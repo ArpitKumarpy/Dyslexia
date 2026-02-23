@@ -1,27 +1,29 @@
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from "pdfjs-dist"
+import pdfWorker from "pdfjs-dist/build/pdf.worker?url"
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
 
 export async function extractTextFromPdf(file: File): Promise<string> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const arrayBuffer = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
 
-    let fullText = '';
+    let fullText = ""
 
     for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
+      const page = await pdf.getPage(i)
+      const textContent = await page.getTextContent()
+
       const pageText = textContent.items
         .map((item: any) => item.str)
-        .join(' ');
+        .join(" ")
 
-      fullText += pageText + '\n\n';
+      fullText += pageText + "\n\n"
     }
 
-    return fullText.trim();
+    return fullText
   } catch (error) {
-    console.error('Error parsing PDF:', error);
-    throw new Error('Failed to parse PDF. Please try another file.');
+    console.error("Error parsing PDF:", error)
+    throw new Error("Failed to parse PDF. Please try another file.")
   }
 }

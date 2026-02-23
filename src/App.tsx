@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ControlPanel } from './components/ControlPanel';
-import { TextEditor } from './components/TextEditor';
+import { TextEditor } from './components/TextEditor/TextEditor';
 import { DocumentModal } from './components/DocumentModal';
 import { ReaderSettings, Document } from './types';
 import { supabase } from './lib/supabase';
