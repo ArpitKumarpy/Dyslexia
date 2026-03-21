@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 @font-face {
   font-family: 'OpenDyslexic';
   src: url('https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/ttf/OpenDyslexic-Regular.ttf') format('truetype');
@@ -112,4 +119,7 @@ textarea::-webkit-scrollbar-thumb:hover {
 
 [contenteditable] span {
   white-space: pre-wrap;
+}
+[contenteditable] {
+  overflow-anchor: none;
 }

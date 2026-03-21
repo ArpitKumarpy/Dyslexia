@@ -1,4 +1,4 @@
-import { Upload, Save, FolderOpen, Volume2, Eye, EyeOff, Grid, Minus, Plus } from 'lucide-react';
+import { Upload, Save, FolderOpen, Volume2, Eye, EyeOff, Grid, Minus } from 'lucide-react';
 import { ReaderSettings } from '../types';
 
 interface ControlPanelProps {

@@ -22,6 +22,10 @@ function App() {
   const [showReadingGuide, setShowReadingGuide] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [wordHighlight, setWordHighlight] = useState(false);
+  const [hoverPronunciationRate, setHoverPronunciationRate] = useState(() => {
+    const storedRate = localStorage.getItem('hover_pronunciation_rate');
+    return storedRate ? parseFloat(storedRate) : 0.85;
+  });
   const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
@@ -30,6 +34,10 @@ function App() {
   useEffect(() => {
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('hover_pronunciation_rate', hoverPronunciationRate.toString());
+  }, [hoverPronunciationRate]);
 
   const loadSettings = async () => {
     const sessionId = getSessionId();
@@ -217,6 +225,8 @@ function App() {
         showReadingGuide={showReadingGuide}
         focusMode={focusMode}
         wordHighlight={wordHighlight}
+        hoverPronunciationRate={hoverPronunciationRate}
+        onHoverPronunciationRateChange={setHoverPronunciationRate}
       />
       {showDocumentModal && (
         <DocumentModal
