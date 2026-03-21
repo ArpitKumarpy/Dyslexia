@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as Rea
 import { Volume2 } from 'lucide-react';
 import { ReaderSettings } from '../../types';
 import { tokenizeText } from '../../utils/tokenizeText';
-import { buildPronunciationGuide, normalizeWord } from '../../utils/pronunciation';
+import { analyzeWordSupport, normalizeWord } from '../../utils/pronunciation';
+import { analyzeWordDifficulty } from '../../utils/wordDifficulty';
+import { analyzeSentence, splitIntoSentences } from '../../utils/sentences';
 
 interface TextEditorProps {
   content: string;
@@ -11,6 +13,9 @@ interface TextEditorProps {
   showReadingGuide: boolean;
   focusMode: boolean;
   wordHighlight: boolean;
+  showDifficultWords: boolean;
+  showSentenceSimplification: boolean;
+  activeSentenceIndex: number | null;
   hoverPronunciationRate: number;
   onHoverPronunciationRateChange: (rate: number) => void;
 }
@@ -18,6 +23,12 @@ interface TextEditorProps {
 type HoverCard = {
   word: string;
   breakdown: string[];
+  phoneticHint: string;
+  morphology: {
+    prefix?: string;
+    root: string;
+    suffix?: string;
+  };
   top: number;
   left: number;
 };
@@ -29,6 +40,9 @@ export function TextEditor({
   showReadingGuide,
   focusMode,
   wordHighlight,
+  showDifficultWords,
+  showSentenceSimplification,
+  activeSentenceIndex,
   hoverPronunciationRate,
   onHoverPronunciationRateChange,
 }: TextEditorProps) {
@@ -38,6 +52,7 @@ export function TextEditor({
   const isUserTyping = useRef(false);
   const hideTimerRef = useRef<number | null>(null);
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
+  const [clauseFocusBySentence, setClauseFocusBySentence] = useState<Record<number, number>>({});
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -70,16 +85,33 @@ export function TextEditor({
       return;
     }
 
-    const tokens = tokenizeText(content);
+    const sentences = splitIntoSentences(content);
 
-    editorRef.current.innerHTML = tokens
-      .map((token) =>
-        token.isWord
-          ? `<span data-word="true" class="inline-block cursor-help rounded px-0.5 transition-colors hover:bg-amber-200/70">${escapeHtml(token.text)}</span>`
-          : escapeHtml(token.text)
+    editorRef.current.innerHTML = sentences
+      .map((sentence) =>
+        buildSentenceMarkup(
+          sentence.text,
+          sentence.index,
+          activeSentenceIndex,
+          showDifficultWords,
+          showSentenceSimplification,
+          clauseFocusBySentence[sentence.index] ?? 0
+        )
       )
       .join('');
-  }, [content]);
+  }, [content, showDifficultWords, showSentenceSimplification, activeSentenceIndex, clauseFocusBySentence]);
+
+  useEffect(() => {
+    if (!editorRef.current || activeSentenceIndex === null) {
+      return;
+    }
+
+    const activeSentence = editorRef.current.querySelector(
+      `[data-sentence-index="${activeSentenceIndex}"]`
+    ) as HTMLSpanElement | null;
+
+    activeSentence?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [activeSentenceIndex]);
 
   useEffect(() => {
     return () => {
@@ -130,6 +162,7 @@ export function TextEditor({
     clearHideTimer();
     const containerRect = containerRef.current.getBoundingClientRect();
     const cardWidth = 288;
+    const wordSupport = analyzeWordSupport(hoveredWord.word);
     const left = Math.min(
       Math.max(hoveredWord.rect.left - containerRect.left, 16),
       Math.max(16, containerRect.width - cardWidth - 16)
@@ -137,10 +170,37 @@ export function TextEditor({
 
     setHoverCard({
       word: hoveredWord.word,
-      breakdown: buildPronunciationGuide(hoveredWord.word),
+      breakdown: wordSupport.chunks,
+      phoneticHint: wordSupport.phoneticHint,
+      morphology: wordSupport.morphology,
       top: hoveredWord.rect.bottom - containerRect.top + 12,
       left,
     });
+  };
+
+  const handleEditorClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!showSentenceSimplification) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    const sentenceElement = target.closest('[data-sentence-index]') as HTMLElement | null;
+    if (!sentenceElement) {
+      return;
+    }
+
+    const sentenceIndex = Number(sentenceElement.dataset.sentenceIndex);
+    const clauseCount = Number(sentenceElement.dataset.clauseCount ?? '0');
+    const isComplex = sentenceElement.dataset.isComplex === 'true';
+
+    if (!Number.isFinite(sentenceIndex) || !isComplex || clauseCount <= 1) {
+      return;
+    }
+
+    setClauseFocusBySentence((current) => ({
+      ...current,
+      [sentenceIndex]: ((current[sentenceIndex] ?? 0) + 1) % clauseCount,
+    }));
   };
 
   const pronounceHoveredWord = () => {
@@ -226,12 +286,25 @@ export function TextEditor({
 
           <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2">
             <p className="text-xs font-medium uppercase tracking-wide text-amber-800">
-              Read It In Chunks
+              Syllable-Like Chunks
             </p>
             <p className="mt-1 text-base font-semibold text-amber-950">
               {hoverCard.breakdown.join(' - ')}
             </p>
           </div>
+
+          {hoverCard.phoneticHint && (
+            <div className="mt-3 rounded-lg bg-sky-50 px-3 py-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-sky-800">
+                Sounds Like
+              </p>
+              <p className="mt-1 text-base font-semibold text-sky-950">
+                {hoverCard.phoneticHint}
+              </p>
+            </div>
+          )}
+
+          {renderMorphologySummary(hoverCard.morphology)}
 
           <div className="mt-3">
             <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -247,6 +320,8 @@ export function TextEditor({
               className="mt-2 w-full"
             />
           </div>
+
+          {renderDifficultySummary(hoverCard.word)}
         </div>
       )}
 
@@ -261,6 +336,7 @@ export function TextEditor({
           suppressContentEditableWarning
           spellCheck={false}
           onInput={handleInput}
+          onClick={handleEditorClick}
           onMouseMove={handleEditorMouseMove}
           className={`min-h-full p-8 focus:outline-none whitespace-pre-wrap break-words ${
             wordHighlight ? 'word-highlight' : ''
@@ -277,6 +353,97 @@ function escapeHtml(input: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function buildTokenMarkup(text: string, isWord: boolean, showDifficultWords: boolean): string {
+  if (!isWord) {
+    return escapeHtml(text);
+  }
+
+  const difficulty = analyzeWordDifficulty(text);
+  const difficultyClass = showDifficultWords && difficulty.isDifficult
+    ? difficulty.level === 'high'
+      ? ' difficult-word difficult-word--high'
+      : ' difficult-word difficult-word--moderate'
+    : '';
+
+  return `<span data-word="true" class="inline-block cursor-help rounded px-0.5 transition-colors hover:bg-amber-200/70${difficultyClass}">${escapeHtml(text)}</span>`;
+}
+
+function buildSentenceMarkup(
+  text: string,
+  sentenceIndex: number,
+  activeSentenceIndex: number | null,
+  showDifficultWords: boolean,
+  showSentenceSimplification: boolean,
+  activeClauseIndex: number
+): string {
+  const sentenceAnalysis = analyzeSentence(text);
+  const sentenceClass = activeSentenceIndex === sentenceIndex
+    ? ' sentence-active'
+    : '';
+  const isSimplified = showSentenceSimplification && sentenceAnalysis.isComplex;
+
+  const content = isSimplified
+    ? sentenceAnalysis.clauses
+        .map((clause, clauseIndex) => {
+          const clauseTokens = tokenizeText(clause);
+          const clauseContent = clauseTokens
+            .map((token) => buildTokenMarkup(token.text, token.isWord, showDifficultWords))
+            .join('');
+          const clauseClass = clauseIndex === activeClauseIndex
+            ? ' sentence-clause sentence-clause--active'
+            : ' sentence-clause sentence-clause--muted';
+
+          return `<span data-clause-index="${clauseIndex}" class="${clauseClass}">${clauseContent}</span>`;
+        })
+        .join('<span class="sentence-clause-break"> / </span>')
+    : tokenizeText(text)
+        .map((token) => buildTokenMarkup(token.text, token.isWord, showDifficultWords))
+        .join('');
+
+  const hint = isSimplified
+    ? '<span class="sentence-simplification-hint">click sentence to step through clauses</span>'
+    : '';
+
+  return `<span data-sentence-index="${sentenceIndex}" data-clause-count="${sentenceAnalysis.clauses.length}" data-is-complex="${sentenceAnalysis.isComplex}" class="sentence-segment${sentenceClass}${isSimplified ? ' sentence-segment--simplified' : ''}">${content}${hint}</span>`;
+}
+
+function renderDifficultySummary(word: string) {
+  const difficulty = analyzeWordDifficulty(word);
+  if (!difficulty.isDifficult) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-rose-700">
+        Why This May Feel Harder
+      </p>
+      <p className="mt-1 text-sm text-rose-900">
+        {difficulty.reasons.join(', ')}
+      </p>
+    </div>
+  );
+}
+
+function renderMorphologySummary(morphology: HoverCard['morphology']) {
+  if (!morphology.prefix && !morphology.suffix) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">
+        Word Parts
+      </p>
+      <p className="mt-1 text-sm text-emerald-950">
+        {morphology.prefix ? `prefix: ${morphology.prefix} • ` : ''}
+        root: {morphology.root}
+        {morphology.suffix ? ` • suffix: ${morphology.suffix}` : ''}
+      </p>
+    </div>
+  );
 }
 
 function getWordAtPoint(x: number, y: number): { word: string; rect: DOMRect } | null {

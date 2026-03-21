@@ -5,6 +5,7 @@ import { DocumentModal } from './components/DocumentModal';
 import { ReaderSettings, Document } from './types';
 import { supabase } from './lib/supabase';
 import { extractTextFromPdf } from './utils/pdfParser';
+import { splitIntoSentences } from './utils/sentences';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
   fontFamily: 'Arial, sans-serif',
@@ -22,6 +23,8 @@ function App() {
   const [showReadingGuide, setShowReadingGuide] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [wordHighlight, setWordHighlight] = useState(false);
+  const [showDifficultWords, setShowDifficultWords] = useState(false);
+  const [showSentenceSimplification, setShowSentenceSimplification] = useState(false);
   const [hoverPronunciationRate, setHoverPronunciationRate] = useState(() => {
     const storedRate = localStorage.getItem('hover_pronunciation_rate');
     return storedRate ? parseFloat(storedRate) : 0.85;
@@ -30,6 +33,7 @@ function App() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [activeSentenceIndex, setActiveSentenceIndex] = useState<number | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -38,6 +42,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem('hover_pronunciation_rate', hoverPronunciationRate.toString());
   }, [hoverPronunciationRate]);
+
+  useEffect(() => {
+    if (!content.trim()) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setActiveSentenceIndex(null);
+    }
+  }, [content]);
 
   const loadSettings = async () => {
     const sessionId = getSessionId();
@@ -179,6 +191,7 @@ function App() {
       if (isSpeaking) {
         window.speechSynthesis.cancel();
         setIsSpeaking(false);
+        setActiveSentenceIndex(null);
         return;
       }
 
@@ -187,19 +200,53 @@ function App() {
         return;
       }
 
-      const utterance = new SpeechSynthesisUtterance(content);
-      utterance.rate = 0.9;
-      utterance.pitch = 1;
-      utterance.volume = 1;
+      const sentences = splitIntoSentences(content).filter((segment) => segment.text.trim());
+      if (sentences.length === 0) {
+        return;
+      }
 
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-
-      window.speechSynthesis.speak(utterance);
       setIsSpeaking(true);
+      speakSentenceSequence(sentences, 0);
     } else {
       alert('Text-to-speech is not supported in your browser.');
     }
+  };
+
+  const speakSentenceSequence = (sentences: { index: number; text: string }[], index: number) => {
+    if (!('speechSynthesis' in window)) {
+      return;
+    }
+
+    if (index >= sentences.length) {
+      setIsSpeaking(false);
+      setActiveSentenceIndex(null);
+      return;
+    }
+
+    const sentence = sentences[index];
+    setActiveSentenceIndex(sentence.index);
+
+    const utterance = new SpeechSynthesisUtterance(sentence.text.trim());
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onend = () => {
+      if (!window.speechSynthesis.speaking && index === sentences.length - 1) {
+        setIsSpeaking(false);
+        setActiveSentenceIndex(null);
+        return;
+      }
+
+      speakSentenceSequence(sentences, index + 1);
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setActiveSentenceIndex(null);
+    };
+
+    window.speechSynthesis.speak(utterance);
   };
 
   return (
@@ -217,6 +264,10 @@ function App() {
         onToggleFocusMode={() => setFocusMode(!focusMode)}
         wordHighlight={wordHighlight}
         onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
+        showDifficultWords={showDifficultWords}
+        onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
+        showSentenceSimplification={showSentenceSimplification}
+        onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
       />
       <TextEditor
         content={content}
@@ -225,6 +276,9 @@ function App() {
         showReadingGuide={showReadingGuide}
         focusMode={focusMode}
         wordHighlight={wordHighlight}
+        showDifficultWords={showDifficultWords}
+        showSentenceSimplification={showSentenceSimplification}
+        activeSentenceIndex={activeSentenceIndex}
         hoverPronunciationRate={hoverPronunciationRate}
         onHoverPronunciationRateChange={setHoverPronunciationRate}
       />

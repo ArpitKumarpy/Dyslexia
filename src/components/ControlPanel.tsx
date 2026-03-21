@@ -1,4 +1,4 @@
-import { Upload, Save, FolderOpen, Volume2, Eye, EyeOff, Grid, Minus } from 'lucide-react';
+import { Upload, Save, FolderOpen, Volume2, Eye, EyeOff, Grid, Minus, AlertTriangle, AlignLeft } from 'lucide-react';
 import { ReaderSettings } from '../types';
 
 interface ControlPanelProps {
@@ -14,6 +14,10 @@ interface ControlPanelProps {
   onToggleFocusMode: () => void;
   wordHighlight: boolean;
   onToggleWordHighlight: () => void;
+  showDifficultWords: boolean;
+  onToggleDifficultWords: () => void;
+  showSentenceSimplification: boolean;
+  onToggleSentenceSimplification: () => void;
 }
 
 const FONTS = [
@@ -46,6 +50,10 @@ export function ControlPanel({
   onToggleFocusMode,
   wordHighlight,
   onToggleWordHighlight,
+  showDifficultWords,
+  onToggleDifficultWords,
+  showSentenceSimplification,
+  onToggleSentenceSimplification,
 }: ControlPanelProps) {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -236,6 +244,24 @@ export function ControlPanel({
             >
               <Minus size={18} />
               Word Highlight
+            </button>
+            <button
+              onClick={onToggleDifficultWords}
+              className={`w-full px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors ${
+                showDifficultWords ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <AlertTriangle size={18} />
+              Difficult Words
+            </button>
+            <button
+              onClick={onToggleSentenceSimplification}
+              className={`w-full px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors ${
+                showSentenceSimplification ? 'bg-teal-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <AlignLeft size={18} />
+              Sentence Simplification
             </button>
             <button
               onClick={onTextToSpeech}
