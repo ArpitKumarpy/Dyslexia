@@ -25,6 +25,7 @@ function App() {
   const [wordHighlight, setWordHighlight] = useState(false);
   const [showDifficultWords, setShowDifficultWords] = useState(false);
   const [showSentenceSimplification, setShowSentenceSimplification] = useState(false);
+  const [headTrackingEnabled, setHeadTrackingEnabled] = useState(false);
   const [hoverPronunciationRate, setHoverPronunciationRate] = useState(() => {
     const storedRate = localStorage.getItem('hover_pronunciation_rate');
     return storedRate ? parseFloat(storedRate) : 0.85;
@@ -268,6 +269,8 @@ function App() {
         onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
         showSentenceSimplification={showSentenceSimplification}
         onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
+        headTrackingEnabled={headTrackingEnabled}
+        onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
       />
       <TextEditor
         content={content}
@@ -278,6 +281,7 @@ function App() {
         wordHighlight={wordHighlight}
         showDifficultWords={showDifficultWords}
         showSentenceSimplification={showSentenceSimplification}
+        headTrackingEnabled={headTrackingEnabled}
         activeSentenceIndex={activeSentenceIndex}
         hoverPronunciationRate={hoverPronunciationRate}
         onHoverPronunciationRateChange={setHoverPronunciationRate}

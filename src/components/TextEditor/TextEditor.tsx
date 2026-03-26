@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { Volume2 } from 'lucide-react';
+import type { FaceLandmarker, FaceLandmarkerResult, NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { ReaderSettings } from '../../types';
 import { tokenizeText } from '../../utils/tokenizeText';
 import { analyzeWordSupport, normalizeWord } from '../../utils/pronunciation';
@@ -15,6 +16,7 @@ interface TextEditorProps {
   wordHighlight: boolean;
   showDifficultWords: boolean;
   showSentenceSimplification: boolean;
+  headTrackingEnabled: boolean;
   activeSentenceIndex: number | null;
   hoverPronunciationRate: number;
   onHoverPronunciationRateChange: (rate: number) => void;
@@ -33,6 +35,21 @@ type HoverCard = {
   left: number;
 };
 
+type HeadTrackingStatus = 'idle' | 'starting' | 'active' | 'error';
+
+type WordTarget = {
+  element: HTMLElement;
+  word: string;
+  rect: DOMRect;
+};
+
+const HEAD_TRACKING_SAMPLE_MS = 220;
+const HEAD_TRACKING_STABILITY_THRESHOLD = 2;
+const MEDIAPIPE_VERSION = '0.10.34';
+const MEDIAPIPE_WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
+const FACE_LANDMARKER_MODEL_URL =
+  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+
 export function TextEditor({
   content,
   onContentChange,
@@ -42,17 +59,33 @@ export function TextEditor({
   wordHighlight,
   showDifficultWords,
   showSentenceSimplification,
+  headTrackingEnabled,
   activeSentenceIndex,
   hoverPronunciationRate,
   onHoverPronunciationRateChange,
 }: TextEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const hoverCardRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const editorScrollRef = useRef<HTMLDivElement>(null);
   const guideRef = useRef<HTMLDivElement>(null);
+  const webcamRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const faceLandmarkerRef = useRef<FaceLandmarker | null>(null);
+  const activeHeadSentenceElementRef = useRef<HTMLElement | null>(null);
+  const activeHeadSentenceIndexRef = useRef<number | null>(null);
+  const pendingHeadSentenceIndexRef = useRef<number | null>(null);
+  const pendingHeadSentenceHitsRef = useRef(0);
+  const trackingFrameRef = useRef<number | null>(null);
+  const lastTrackingSampleRef = useRef(0);
+  const isTrackingFramePendingRef = useRef(false);
   const isUserTyping = useRef(false);
   const hideTimerRef = useRef<number | null>(null);
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
+  const [isHoverCardPinned, setIsHoverCardPinned] = useState(false);
   const [clauseFocusBySentence, setClauseFocusBySentence] = useState<Record<number, number>>({});
+  const [headTrackingStatus, setHeadTrackingStatus] = useState<HeadTrackingStatus>('idle');
+  const [headTrackingError, setHeadTrackingError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -99,6 +132,8 @@ export function TextEditor({
         )
       )
       .join('');
+
+    syncHeadTrackedSentenceHighlight();
   }, [content, showDifficultWords, showSentenceSimplification, activeSentenceIndex, clauseFocusBySentence]);
 
   useEffect(() => {
@@ -114,12 +149,122 @@ export function TextEditor({
   }, [activeSentenceIndex]);
 
   useEffect(() => {
+    if (!isHoverCardPinned) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (hoverCardRef.current?.contains(target)) {
+        return;
+      }
+
+      const clickedElement = target instanceof HTMLElement ? target : target.parentElement;
+      if (clickedElement?.closest('[data-word="true"]')) {
+        return;
+      }
+
+      setIsHoverCardPinned(false);
+      setHoverCard(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [isHoverCardPinned]);
+
+  useEffect(() => {
     return () => {
+      stopHeadTracking();
       if (hideTimerRef.current) {
         window.clearTimeout(hideTimerRef.current);
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!headTrackingEnabled) {
+      stopHeadTracking();
+      setHeadTrackingStatus('idle');
+      setHeadTrackingError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const startHeadTracking = async () => {
+      const webcam = webcamRef.current;
+      if (!webcam) {
+        setHeadTrackingStatus('error');
+        setHeadTrackingError('The camera preview could not be prepared.');
+        return;
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setHeadTrackingStatus('error');
+        setHeadTrackingError('This browser does not support webcam access.');
+        return;
+      }
+
+      setHeadTrackingStatus('starting');
+      setHeadTrackingError(null);
+
+      try {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: 'user',
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+        });
+
+        if (cancelled) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        mediaStreamRef.current = mediaStream;
+        webcam.srcObject = mediaStream;
+        await webcam.play();
+
+        if (cancelled) {
+          stopHeadTracking();
+          return;
+        }
+
+        const vision = await import('@mediapipe/tasks-vision');
+        if (cancelled) {
+          stopHeadTracking();
+          return;
+        }
+
+        const filesetResolver = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
+        if (cancelled) {
+          stopHeadTracking();
+          return;
+        }
+
+        faceLandmarkerRef.current = await createFaceLandmarkerWithFallback(vision, filesetResolver);
+
+        setHeadTrackingStatus('active');
+        trackingFrameRef.current = window.requestAnimationFrame(runHeadTrackingLoop);
+      } catch (error) {
+        setHeadTrackingStatus('error');
+        setHeadTrackingError(getHeadTrackingErrorMessage(error));
+      }
+    };
+
+    startHeadTracking();
+
+    return () => {
+      cancelled = true;
+      stopHeadTracking();
+    };
+  }, [headTrackingEnabled]);
 
   const handleInput = () => {
     if (!editorRef.current) {
@@ -141,44 +286,227 @@ export function TextEditor({
   };
 
   const scheduleHideCard = () => {
+    if (isHoverCardPinned) {
+      return;
+    }
+
     clearHideTimer();
     hideTimerRef.current = window.setTimeout(() => {
       setHoverCard(null);
     }, 140);
   };
 
-  const handleEditorMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!containerRef.current) {
-      scheduleHideCard();
+  const stopHeadTracking = () => {
+    if (trackingFrameRef.current !== null) {
+      window.cancelAnimationFrame(trackingFrameRef.current);
+      trackingFrameRef.current = null;
+    }
+
+    lastTrackingSampleRef.current = 0;
+    isTrackingFramePendingRef.current = false;
+    pendingHeadSentenceIndexRef.current = null;
+    pendingHeadSentenceHitsRef.current = 0;
+    faceLandmarkerRef.current?.close();
+    faceLandmarkerRef.current = null;
+
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+
+    if (webcamRef.current) {
+      webcamRef.current.pause();
+      webcamRef.current.srcObject = null;
+    }
+
+    setHeadTrackedSentenceIndex(null);
+  };
+
+  const setHeadTrackedSentenceIndex = (sentenceIndex: number | null) => {
+    if (activeHeadSentenceIndexRef.current === sentenceIndex) {
       return;
     }
 
-    const hoveredWord = getWordAtPoint(event.clientX, event.clientY);
-    if (!hoveredWord) {
-      scheduleHideCard();
+    activeHeadSentenceElementRef.current?.classList.remove('sentence-head-active');
+    activeHeadSentenceElementRef.current = null;
+    activeHeadSentenceIndexRef.current = sentenceIndex;
+
+    if (sentenceIndex === null || !editorRef.current) {
+      return;
+    }
+
+    const sentenceElement = editorRef.current.querySelector(
+      `[data-sentence-index="${sentenceIndex}"]`
+    ) as HTMLElement | null;
+
+    sentenceElement?.classList.add('sentence-head-active');
+    activeHeadSentenceElementRef.current = sentenceElement;
+  };
+
+  const syncHeadTrackedSentenceHighlight = () => {
+    if (
+      activeHeadSentenceIndexRef.current !== null &&
+      editorRef.current &&
+      !editorRef.current.contains(activeHeadSentenceElementRef.current)
+    ) {
+      setHeadTrackedSentenceIndex(activeHeadSentenceIndexRef.current);
+    }
+  };
+
+  const runHeadTrackingLoop = () => {
+    trackingFrameRef.current = window.requestAnimationFrame(runHeadTrackingLoop);
+
+    const webcam = webcamRef.current;
+    const landmarker = faceLandmarkerRef.current;
+    if (
+      !webcam ||
+      !landmarker ||
+      webcam.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+      isTrackingFramePendingRef.current
+    ) {
+      return;
+    }
+
+    const now = performance.now();
+    if (now - lastTrackingSampleRef.current < HEAD_TRACKING_SAMPLE_MS) {
+      return;
+    }
+
+    lastTrackingSampleRef.current = now;
+    isTrackingFramePendingRef.current = true;
+
+    try {
+      const result = landmarker.detectForVideo(webcam, now);
+      const sentenceIndex = findHeadTrackedSentenceIndex(result);
+      if (sentenceIndex === null) {
+        pendingHeadSentenceIndexRef.current = null;
+        pendingHeadSentenceHitsRef.current = 0;
+        return;
+      }
+
+      if (pendingHeadSentenceIndexRef.current !== sentenceIndex) {
+        pendingHeadSentenceIndexRef.current = sentenceIndex;
+        pendingHeadSentenceHitsRef.current = 1;
+        return;
+      }
+
+      pendingHeadSentenceHitsRef.current += 1;
+      if (
+        pendingHeadSentenceHitsRef.current >= HEAD_TRACKING_STABILITY_THRESHOLD &&
+        activeHeadSentenceIndexRef.current !== sentenceIndex
+      ) {
+        setHeadTrackedSentenceIndex(sentenceIndex);
+      }
+    } catch (error) {
+      setHeadTrackingStatus('error');
+      setHeadTrackingError('Head tracking stopped because face landmark detection failed.');
+      stopHeadTracking();
+    } finally {
+      isTrackingFramePendingRef.current = false;
+    }
+  };
+
+  const findHeadTrackedSentenceIndex = (result: FaceLandmarkerResult | null): number | null => {
+    if (!result || !editorRef.current || !editorScrollRef.current) {
+      return null;
+    }
+
+    const trackedFaceY = getTrackedFaceCenterY(result.faceLandmarks[0]);
+    if (trackedFaceY === null) {
+      return null;
+    }
+
+    const visibleSentences = Array.from(
+      editorRef.current.querySelectorAll('[data-sentence-index]')
+    ).filter((element): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const sentenceRect = element.getBoundingClientRect();
+      const scrollRect = editorScrollRef.current?.getBoundingClientRect();
+      if (!scrollRect) {
+        return false;
+      }
+
+      return sentenceRect.bottom >= scrollRect.top && sentenceRect.top <= scrollRect.bottom;
+    });
+
+    if (visibleSentences.length === 0) {
+      return null;
+    }
+
+    const scrollRect = editorScrollRef.current.getBoundingClientRect();
+    const targetY = scrollRect.top + trackedFaceY * scrollRect.height;
+
+    let nearestSentence: HTMLElement | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const sentenceElement of visibleSentences) {
+      const sentenceRect = sentenceElement.getBoundingClientRect();
+      const sentenceCenterY = sentenceRect.top + sentenceRect.height / 2;
+      const distance = Math.abs(sentenceCenterY - targetY);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestSentence = sentenceElement;
+      }
+    }
+
+    if (!nearestSentence) {
+      return null;
+    }
+
+    const sentenceIndex = Number(nearestSentence.dataset.sentenceIndex);
+    return Number.isFinite(sentenceIndex) ? sentenceIndex : null;
+  };
+
+  const showHoverCardForWordTarget = (wordTarget: WordTarget) => {
+    if (!containerRef.current) {
       return;
     }
 
     clearHideTimer();
     const containerRect = containerRef.current.getBoundingClientRect();
     const cardWidth = 288;
-    const wordSupport = analyzeWordSupport(hoveredWord.word);
+    const wordSupport = analyzeWordSupport(wordTarget.word);
     const left = Math.min(
-      Math.max(hoveredWord.rect.left - containerRect.left, 16),
+      Math.max(wordTarget.rect.left - containerRect.left, 16),
       Math.max(16, containerRect.width - cardWidth - 16)
     );
 
     setHoverCard({
-      word: hoveredWord.word,
+      word: wordTarget.word,
       breakdown: wordSupport.chunks,
       phoneticHint: wordSupport.phoneticHint,
       morphology: wordSupport.morphology,
-      top: hoveredWord.rect.bottom - containerRect.top + 12,
+      top: wordTarget.rect.bottom - containerRect.top + 12,
       left,
     });
   };
 
+  const handleEditorMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (isHoverCardPinned) {
+      return;
+    }
+
+    const hoveredWord = getWordTargetAtPoint(event.clientX, event.clientY, editorRef.current);
+    if (!hoveredWord) {
+      scheduleHideCard();
+      return;
+    }
+
+    showHoverCardForWordTarget(hoveredWord);
+  };
+
   const handleEditorClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const clickedWord = getWordTargetAtPoint(event.clientX, event.clientY, editorRef.current);
+    if (clickedWord) {
+      clearHideTimer();
+      setIsHoverCardPinned(true);
+      showHoverCardForWordTarget(clickedWord);
+      return;
+    }
+
+    setIsHoverCardPinned(false);
+
     if (!showSentenceSimplification) {
       return;
     }
@@ -223,12 +551,22 @@ export function TextEditor({
     window.speechSynthesis.speak(utterance);
   };
 
+  const showHeadTrackingStatus = headTrackingEnabled || headTrackingStatus === 'error';
+
   return (
     <div
       ref={containerRef}
       className="relative flex-1 h-full overflow-hidden"
       onMouseLeave={scheduleHideCard}
     >
+      <video
+        ref={webcamRef}
+        className="hidden"
+        autoPlay
+        muted
+        playsInline
+      />
+
       {showReadingGuide && (
         <div
           ref={guideRef}
@@ -260,8 +598,26 @@ export function TextEditor({
         </>
       )}
 
+      {showHeadTrackingStatus && (
+        <div className="absolute right-4 top-4 z-30 max-w-sm rounded-xl border border-slate-200 bg-white/95 px-4 py-3 text-sm shadow-lg backdrop-blur">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+            Head Tracking
+          </p>
+          <p className="mt-1 font-medium text-slate-900">
+            {headTrackingStatus === 'starting' && 'Starting webcam and preparing line tracking...'}
+            {headTrackingStatus === 'active' && 'Active. Move your head gently to shift the highlighted reading line.'}
+            {headTrackingStatus === 'error' && (headTrackingError ?? 'Head tracking is unavailable right now.')}
+            {headTrackingStatus === 'idle' && 'Off'}
+          </p>
+          <p className="mt-1 text-xs text-slate-600">
+            Webcam frames stay in the browser for this session and are cleared when you turn the feature off.
+          </p>
+        </div>
+      )}
+
       {hoverCard && (
         <div
+          ref={hoverCardRef}
           className="absolute z-20 w-72 rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur"
           style={{ top: hoverCard.top, left: hoverCard.left }}
           onMouseEnter={clearHideTimer}
@@ -326,6 +682,7 @@ export function TextEditor({
       )}
 
       <div
+        ref={editorScrollRef}
         className="h-full overflow-y-auto"
         style={{ backgroundColor: settings.backgroundColor }}
         onScroll={scheduleHideCard}
@@ -438,103 +795,138 @@ function renderMorphologySummary(morphology: HoverCard['morphology']) {
         Word Parts
       </p>
       <p className="mt-1 text-sm text-emerald-950">
-        {morphology.prefix ? `prefix: ${morphology.prefix} • ` : ''}
+        {morphology.prefix ? `prefix: ${morphology.prefix} | ` : ''}
         root: {morphology.root}
-        {morphology.suffix ? ` • suffix: ${morphology.suffix}` : ''}
+        {morphology.suffix ? ` | suffix: ${morphology.suffix}` : ''}
       </p>
     </div>
   );
 }
 
-function getWordAtPoint(x: number, y: number): { word: string; rect: DOMRect } | null {
-  const range = getRangeAtPoint(x, y);
-  if (!range) {
+function getWordTargetAtPoint(x: number, y: number, editor: HTMLDivElement | null): WordTarget | null {
+  if (!editor) {
     return null;
   }
 
-  const node = range.startContainer;
-  if (node.nodeType !== Node.TEXT_NODE) {
+  const hoveredElement = document.elementFromPoint(x, y);
+  if (!(hoveredElement instanceof HTMLElement)) {
     return null;
   }
 
-  const text = node.textContent ?? '';
-  if (!text.trim()) {
+  const wordElement = hoveredElement.closest('[data-word="true"]');
+  if (!(wordElement instanceof HTMLElement) || !editor.contains(wordElement)) {
     return null;
   }
 
-  const safeOffset = Math.min(range.startOffset, Math.max(text.length - 1, 0));
-  const index = findWordIndex(text, safeOffset);
-  if (index === -1) {
-    return null;
-  }
-
-  let start = index;
-  let end = index;
-
-  while (start > 0 && isWordCharacter(text[start - 1])) {
-    start -= 1;
-  }
-
-  while (end < text.length && isWordCharacter(text[end])) {
-    end += 1;
-  }
-
-  const word = normalizeWord(text.slice(start, end));
+  const word = normalizeWord(wordElement.innerText);
   if (!word) {
     return null;
   }
 
-  const wordRange = document.createRange();
-  wordRange.setStart(node, start);
-  wordRange.setEnd(node, end);
-
   return {
+    element: wordElement,
     word,
-    rect: wordRange.getBoundingClientRect(),
+    rect: wordElement.getBoundingClientRect(),
   };
 }
 
-function getRangeAtPoint(x: number, y: number): Range | null {
-  const doc = document as Document & {
-    caretRangeFromPoint?: (x: number, y: number) => Range | null;
-    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
-  };
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 
-  if (typeof doc.caretRangeFromPoint === 'function') {
-    return doc.caretRangeFromPoint(x, y);
+async function createFaceLandmarkerWithFallback(
+  vision: typeof import('@mediapipe/tasks-vision'),
+  filesetResolver: Awaited<ReturnType<typeof import('@mediapipe/tasks-vision').FilesetResolver.forVisionTasks>>
+): Promise<FaceLandmarker> {
+  try {
+    return await vision.FaceLandmarker.createFromOptions(
+      filesetResolver,
+      buildFaceLandmarkerOptions('GPU')
+    );
+  } catch (gpuError) {
+    try {
+      return await vision.FaceLandmarker.createFromOptions(
+        filesetResolver,
+        buildFaceLandmarkerOptions('CPU')
+      );
+    } catch (cpuError) {
+      throw new Error(
+        `MediaPipe startup failed. GPU: ${formatTrackingError(gpuError)} | CPU: ${formatTrackingError(cpuError)}`
+      );
+    }
+  }
+}
+
+function buildFaceLandmarkerOptions(delegate: 'GPU' | 'CPU') {
+  return {
+    baseOptions: {
+      modelAssetPath: FACE_LANDMARKER_MODEL_URL,
+      delegate,
+    },
+    runningMode: 'VIDEO' as const,
+    numFaces: 1,
+    minFaceDetectionConfidence: 0.5,
+    minFacePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: false,
+  };
+}
+
+function getTrackedFaceCenterY(landmarks: NormalizedLandmark[] | undefined): number | null {
+  if (!landmarks || landmarks.length === 0) {
+    return null;
   }
 
-  if (typeof doc.caretPositionFromPoint === 'function') {
-    const position = doc.caretPositionFromPoint(x, y);
-    if (!position) {
-      return null;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const landmark of landmarks) {
+    minY = Math.min(minY, landmark.y);
+    maxY = Math.max(maxY, landmark.y);
+  }
+
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    return null;
+  }
+
+  return clamp((minY + maxY) / 2, 0, 1);
+}
+
+function getHeadTrackingErrorMessage(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === 'NotAllowedError') {
+      return 'Camera permission was blocked. Please allow webcam access and try again.';
     }
 
-    const range = doc.createRange();
-    range.setStart(position.offsetNode, position.offset);
-    range.collapse(true);
-    return range;
+    if (error.name === 'NotFoundError') {
+      return 'No webcam was found for head tracking.';
+    }
+
+    if (error.name === 'NotReadableError') {
+      return 'Your webcam is busy in another app or tab.';
+    }
+
+    if (error.name === 'NotSupportedError') {
+      return 'This browser could not start the camera or local tracking model.';
+    }
   }
 
-  return null;
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return 'Head tracking could not be started in this browser.';
 }
 
-function findWordIndex(text: string, offset: number): number {
-  if (!text) {
-    return -1;
+function formatTrackingError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
   }
 
-  if (offset < text.length && isWordCharacter(text[offset])) {
-    return offset;
+  if (typeof error === 'string') {
+    return error;
   }
 
-  if (offset > 0 && isWordCharacter(text[offset - 1])) {
-    return offset - 1;
-  }
-
-  return -1;
-}
-
-function isWordCharacter(character: string): boolean {
-  return /[a-zA-Z']/u.test(character);
+  return 'unknown error';
 }

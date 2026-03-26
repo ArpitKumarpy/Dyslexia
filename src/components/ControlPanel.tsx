@@ -1,4 +1,4 @@
-import { Upload, Save, FolderOpen, Volume2, Eye, EyeOff, Grid, Minus, AlertTriangle, AlignLeft } from 'lucide-react';
+import { Upload, Save, FolderOpen, Volume2, Eye, EyeOff, Grid, Minus, AlertTriangle, AlignLeft, ScanEye } from 'lucide-react';
 import { ReaderSettings } from '../types';
 
 interface ControlPanelProps {
@@ -18,6 +18,8 @@ interface ControlPanelProps {
   onToggleDifficultWords: () => void;
   showSentenceSimplification: boolean;
   onToggleSentenceSimplification: () => void;
+  headTrackingEnabled: boolean;
+  onToggleHeadTracking: () => void;
 }
 
 const FONTS = [
@@ -54,6 +56,8 @@ export function ControlPanel({
   onToggleDifficultWords,
   showSentenceSimplification,
   onToggleSentenceSimplification,
+  headTrackingEnabled,
+  onToggleHeadTracking,
 }: ControlPanelProps) {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -262,6 +266,15 @@ export function ControlPanel({
             >
               <AlignLeft size={18} />
               Sentence Simplification
+            </button>
+            <button
+              onClick={onToggleHeadTracking}
+              className={`w-full px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors ${
+                headTrackingEnabled ? 'bg-violet-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <ScanEye size={18} />
+              Head Tracking
             </button>
             <button
               onClick={onTextToSpeech}
