@@ -52,15 +52,15 @@ export function SupportHub({ onClose }: SupportHubProps) {
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-stone-900/50 p-4 backdrop-blur-sm">
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] border border-stone-200 bg-stone-50 shadow-2xl">
-        <div className="border-b border-stone-200 bg-white px-6 py-5">
+    <div className="fixed inset-0 z-50 flex bg-stone-900/50 p-2 backdrop-blur-sm sm:p-4">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-[1.6rem] border border-stone-200 bg-stone-50 shadow-2xl sm:rounded-[2rem]">
+        <div className="border-b border-stone-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
                 Support Hub
               </p>
-              <h2 className="mt-2 text-2xl font-semibold text-stone-900">Trusted dyslexia support, videos, and help lines</h2>
+              <h2 className="mt-2 text-xl font-semibold text-stone-900 sm:text-2xl">Trusted dyslexia support, videos, and help lines</h2>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">
                 This section is powered by a curated, developer-editable list of trusted sources. External links should be reviewed and updated in code whenever needed.
               </p>
@@ -68,7 +68,7 @@ export function SupportHub({ onClose }: SupportHubProps) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+              className="shrink-0 rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
             >
               Close
             </button>
@@ -104,7 +104,7 @@ export function SupportHub({ onClose }: SupportHubProps) {
           </div>
         </div>
 
-        <div className="overflow-y-auto px-6 py-6">
+        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
           <div className="mb-6 grid gap-4 md:grid-cols-3">
             <SummaryCard
               icon={<HeartHandshake size={18} />}
@@ -141,7 +141,7 @@ export function SupportHub({ onClose }: SupportHubProps) {
                       <p className="text-sm text-stone-600">{section.description}</p>
                     </div>
                   </div>
-                  <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="grid gap-4 xl:grid-cols-2">
                     {sectionResources.map((resource) => (
                       <ResourceCard key={resource.id} resource={resource} />
                     ))}

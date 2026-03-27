@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, LifeBuoy, PanelLeftClose, Volume2 } from 'lucide-react';
+import { ArrowLeft, LifeBuoy, Menu, PanelLeftClose, Volume2 } from 'lucide-react';
 import { ControlPanel } from './components/ControlPanel';
 import { TextEditor } from './components/TextEditor/TextEditor';
 import { DocumentModal } from './components/DocumentModal';
@@ -39,6 +39,7 @@ function App() {
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [activeSentenceIndex, setActiveSentenceIndex] = useState<number | null>(null);
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -55,6 +56,12 @@ function App() {
       setActiveSentenceIndex(null);
     }
   }, [content]);
+
+  useEffect(() => {
+    if (readingMode) {
+      setMobilePanelOpen(false);
+    }
+  }, [readingMode]);
 
   const loadSettings = async () => {
     const sessionId = getSessionId();
@@ -273,33 +280,93 @@ function App() {
   };
 
   return (
-    <div className="relative h-screen overflow-hidden bg-stone-100">
-      <div className="flex h-full overflow-hidden">
+    <div className="relative min-h-screen bg-stone-100 md:h-screen md:overflow-hidden">
+      {!readingMode && (
+        <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-stone-200 bg-white px-4 py-3 shadow-sm lg:hidden">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-stone-500">
+              Synapse Dyslexia Reader
+            </p>
+            <p className="mt-1 text-sm font-medium text-stone-900">Reading tools and workspace</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobilePanelOpen(true)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-700"
+            aria-label="Open reading tools"
+          >
+            <Menu size={18} />
+          </button>
+        </div>
+      )}
+
+      <div className="flex min-h-[calc(100vh-4.5rem)] flex-col overflow-hidden lg:h-full lg:min-h-0 lg:flex-row">
         {!readingMode && (
-          <ControlPanel
-            settings={settings}
-            onSettingsChange={handleSettingsChange}
-            onPdfUpload={handlePdfUpload}
-            onSaveDocument={handleSaveDocument}
-            onLoadDocuments={handleLoadDocuments}
-            onTextToSpeech={handleTextToSpeech}
-            showReadingGuide={showReadingGuide}
-            onToggleReadingGuide={() => setShowReadingGuide(!showReadingGuide)}
-            focusMode={focusMode}
-            onToggleFocusMode={() => setFocusMode(!focusMode)}
-            wordHighlight={wordHighlight}
-            onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
-            showDifficultWords={showDifficultWords}
-            onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
-            showSentenceSimplification={showSentenceSimplification}
-            onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
-            headTrackingEnabled={headTrackingEnabled}
-            onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
-            readingMode={readingMode}
-            onToggleReadingMode={() => setReadingMode(!readingMode)}
-            isSpeaking={isSpeaking}
-            onOpenSupportHub={() => setShowSupportHub(true)}
-          />
+          <>
+            <div className="hidden lg:block">
+              <ControlPanel
+                settings={settings}
+                onSettingsChange={handleSettingsChange}
+                onPdfUpload={handlePdfUpload}
+                onSaveDocument={handleSaveDocument}
+                onLoadDocuments={handleLoadDocuments}
+                onTextToSpeech={handleTextToSpeech}
+                showReadingGuide={showReadingGuide}
+                onToggleReadingGuide={() => setShowReadingGuide(!showReadingGuide)}
+                focusMode={focusMode}
+                onToggleFocusMode={() => setFocusMode(!focusMode)}
+                wordHighlight={wordHighlight}
+                onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
+                showDifficultWords={showDifficultWords}
+                onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
+                showSentenceSimplification={showSentenceSimplification}
+                onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
+                headTrackingEnabled={headTrackingEnabled}
+                onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
+                readingMode={readingMode}
+                onToggleReadingMode={() => setReadingMode(!readingMode)}
+                isSpeaking={isSpeaking}
+                onOpenSupportHub={() => setShowSupportHub(true)}
+              />
+            </div>
+            {mobilePanelOpen && (
+              <div className="fixed inset-0 z-40 lg:hidden">
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-stone-900/40 backdrop-blur-[1px]"
+                  onClick={() => setMobilePanelOpen(false)}
+                  aria-label="Close reading tools"
+                />
+                <div className="absolute inset-y-0 left-0 w-[min(24rem,100vw)] shadow-2xl">
+                  <ControlPanel
+                    settings={settings}
+                    onSettingsChange={handleSettingsChange}
+                    onPdfUpload={handlePdfUpload}
+                    onSaveDocument={handleSaveDocument}
+                    onLoadDocuments={handleLoadDocuments}
+                    onTextToSpeech={handleTextToSpeech}
+                    showReadingGuide={showReadingGuide}
+                    onToggleReadingGuide={() => setShowReadingGuide(!showReadingGuide)}
+                    focusMode={focusMode}
+                    onToggleFocusMode={() => setFocusMode(!focusMode)}
+                    wordHighlight={wordHighlight}
+                    onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
+                    showDifficultWords={showDifficultWords}
+                    onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
+                    showSentenceSimplification={showSentenceSimplification}
+                    onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
+                    headTrackingEnabled={headTrackingEnabled}
+                    onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
+                    readingMode={readingMode}
+                    onToggleReadingMode={() => setReadingMode(!readingMode)}
+                    isSpeaking={isSpeaking}
+                    onOpenSupportHub={() => setShowSupportHub(true)}
+                    onCloseMobile={() => setMobilePanelOpen(false)}
+                  />
+                </div>
+              </div>
+            )}
+          </>
         )}
         <TextEditor
           content={content}
@@ -318,20 +385,20 @@ function App() {
         />
       </div>
       {readingMode && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex justify-center px-4 pt-4">
-          <div className="pointer-events-auto flex w-full max-w-4xl items-center justify-between rounded-full border border-stone-200 bg-white px-4 py-3 shadow-lg">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex justify-center px-3 pt-3 sm:px-4 sm:pt-4">
+          <div className="pointer-events-auto flex w-full max-w-4xl flex-col gap-3 rounded-[1.75rem] border border-stone-200 bg-white px-4 py-3 shadow-lg sm:flex-row sm:items-center sm:justify-between sm:rounded-full">
             <div className="flex items-center gap-3 text-sm text-stone-700">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 text-stone-600">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-600">
                 <PanelLeftClose size={18} />
               </span>
-              <div>
+              <div className="min-w-0">
                 <p className="font-semibold text-stone-900">Reading Mode</p>
                 <p className="text-xs text-stone-500">
                   Calm reading layout with fewer controls and less visual noise.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowSupportHub(true)}

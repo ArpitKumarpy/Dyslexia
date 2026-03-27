@@ -35,6 +35,7 @@ type HoverCard = {
   };
   top: number;
   left: number;
+  width: number;
 };
 
 type HeadTrackingStatus = 'idle' | 'starting' | 'active' | 'error';
@@ -468,20 +469,26 @@ export function TextEditor({
 
     clearHideTimer();
     const containerRect = containerRef.current.getBoundingClientRect();
-    const cardWidth = 288;
+    const cardWidth = Math.min(320, Math.max(252, containerRect.width - 32));
     const wordSupport = analyzeWordSupport(wordTarget.word);
     const left = Math.min(
       Math.max(wordTarget.rect.left - containerRect.left, 16),
       Math.max(16, containerRect.width - cardWidth - 16)
     );
+    const estimatedCardHeight = 280;
+    const preferredTop = wordTarget.rect.bottom - containerRect.top + 12;
+    const top = preferredTop + estimatedCardHeight > containerRect.height - 16
+      ? Math.max(16, wordTarget.rect.top - containerRect.top - estimatedCardHeight - 12)
+      : preferredTop;
 
     setHoverCard({
       word: wordTarget.word,
       breakdown: wordSupport.chunks,
       phoneticHint: wordSupport.phoneticHint,
       morphology: wordSupport.morphology,
-      top: wordTarget.rect.bottom - containerRect.top + 12,
+      top,
       left,
+      width: cardWidth,
     });
   };
 
@@ -559,7 +566,7 @@ export function TextEditor({
   return (
     <div
       ref={containerRef}
-      className={`relative flex-1 h-full overflow-hidden ${readingMode ? 'bg-stone-100' : 'bg-stone-100/70'}`}
+      className={`relative flex-1 overflow-hidden ${readingMode ? 'bg-stone-100' : 'bg-stone-100/70'} min-h-[calc(100vh-4.5rem)] lg:h-full lg:min-h-0`}
       onMouseLeave={scheduleHideCard}
     >
       <video
@@ -602,8 +609,10 @@ export function TextEditor({
       )}
 
       {showHeadTrackingStatus && (
-        <div className={`absolute z-30 max-w-sm rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm shadow-lg ${
-          readingMode ? 'right-4 top-24' : 'right-4 top-4'
+        <div className={`absolute z-30 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm shadow-lg ${
+          readingMode
+            ? 'left-3 right-3 top-24 sm:left-auto sm:right-4 sm:top-24 sm:max-w-sm'
+            : 'left-3 right-3 top-3 sm:left-auto sm:right-4 sm:top-4 sm:max-w-sm'
         }`}>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             Head Tracking
@@ -623,8 +632,8 @@ export function TextEditor({
       {hoverCard && (
         <div
           ref={hoverCardRef}
-          className="absolute z-20 w-80 rounded-2xl border border-stone-200 bg-white p-4 shadow-xl"
-          style={{ top: hoverCard.top, left: hoverCard.left }}
+          className="absolute z-20 max-w-[calc(100%-2rem)] rounded-2xl border border-stone-200 bg-white p-4 shadow-xl"
+          style={{ top: hoverCard.top, left: hoverCard.left, width: hoverCard.width }}
           onMouseEnter={clearHideTimer}
           onMouseLeave={scheduleHideCard}
         >
@@ -705,13 +714,15 @@ export function TextEditor({
           onInput={handleInput}
           onClick={handleEditorClick}
           onMouseMove={handleEditorMouseMove}
-          className={`mx-auto min-h-full max-w-4xl focus:outline-none whitespace-pre-wrap break-words ${
+          className={`mx-auto min-h-full w-full max-w-4xl focus:outline-none whitespace-pre-wrap break-words ${
             wordHighlight ? 'word-highlight' : ''
           }`}
           style={{
             ...editorStyle,
             backgroundColor: 'transparent',
-            padding: readingMode ? '7rem 3.5rem 5rem' : '3rem 3rem 4rem',
+            padding: readingMode
+              ? '7rem clamp(1rem, 4vw, 3.5rem) 4.5rem'
+              : 'clamp(1.5rem, 4vw, 3rem) clamp(1rem, 4vw, 3rem) 4rem',
           }}
         />
       </div>

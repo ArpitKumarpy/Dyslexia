@@ -6,6 +6,7 @@ import {
   FolderOpen,
   Grid,
   Minus,
+  X,
   PanelLeftClose,
   LifeBuoy,
   Save,
@@ -38,6 +39,8 @@ interface ControlPanelProps {
   onToggleReadingMode: () => void;
   isSpeaking: boolean;
   onOpenSupportHub: () => void;
+  className?: string;
+  onCloseMobile?: () => void;
 }
 
 const FONTS = [
@@ -79,6 +82,8 @@ export function ControlPanel({
   onToggleReadingMode,
   isSpeaking,
   onOpenSupportHub,
+  className = '',
+  onCloseMobile,
 }: ControlPanelProps) {
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -88,7 +93,7 @@ export function ControlPanel({
   };
 
   return (
-    <aside className="w-[22rem] shrink-0 overflow-y-auto border-r border-stone-200 bg-stone-50/95 px-5 py-6">
+    <aside className={`h-full w-full shrink-0 overflow-y-auto border-r border-stone-200 bg-stone-50 px-4 py-4 sm:px-5 sm:py-6 lg:w-[22rem] ${className}`}>
       <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-stone-200/70">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -100,14 +105,26 @@ export function ControlPanel({
               Calm reading support with clearer wording, gentler visuals, and a dedicated reading mode.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onToggleReadingMode}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200"
-            title="Enter reading mode"
-          >
-            <PanelLeftClose size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            {onCloseMobile && (
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200 lg:hidden"
+                title="Close tools"
+              >
+                <X size={18} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onToggleReadingMode}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200"
+              title="Enter reading mode"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-2">
