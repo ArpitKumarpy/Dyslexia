@@ -6,6 +6,7 @@ import { tokenizeText } from '../../utils/tokenizeText';
 import { analyzeWordSupport, normalizeWord } from '../../utils/pronunciation';
 import { analyzeWordDifficulty } from '../../utils/wordDifficulty';
 import { analyzeSentence, splitIntoSentences } from '../../utils/sentences';
+import { getSimpleDefinition } from '../../utils/simpleDefinitions';
 
 interface TextEditorProps {
   content: string;
@@ -17,6 +18,7 @@ interface TextEditorProps {
   showDifficultWords: boolean;
   showSentenceSimplification: boolean;
   headTrackingEnabled: boolean;
+  readingMode: boolean;
   activeSentenceIndex: number | null;
   hoverPronunciationRate: number;
   onHoverPronunciationRateChange: (rate: number) => void;
@@ -60,6 +62,7 @@ export function TextEditor({
   showDifficultWords,
   showSentenceSimplification,
   headTrackingEnabled,
+  readingMode,
   activeSentenceIndex,
   hoverPronunciationRate,
   onHoverPronunciationRateChange,
@@ -556,7 +559,7 @@ export function TextEditor({
   return (
     <div
       ref={containerRef}
-      className="relative flex-1 h-full overflow-hidden"
+      className={`relative flex-1 h-full overflow-hidden ${readingMode ? 'bg-stone-100' : 'bg-stone-100/70'}`}
       onMouseLeave={scheduleHideCard}
     >
       <video
@@ -599,7 +602,9 @@ export function TextEditor({
       )}
 
       {showHeadTrackingStatus && (
-        <div className="absolute right-4 top-4 z-30 max-w-sm rounded-xl border border-slate-200 bg-white/95 px-4 py-3 text-sm shadow-lg backdrop-blur">
+        <div className={`absolute z-30 max-w-sm rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm shadow-lg ${
+          readingMode ? 'right-4 top-24' : 'right-4 top-4'
+        }`}>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             Head Tracking
           </p>
@@ -618,7 +623,7 @@ export function TextEditor({
       {hoverCard && (
         <div
           ref={hoverCardRef}
-          className="absolute z-20 w-72 rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur"
+          className="absolute z-20 w-80 rounded-2xl border border-stone-200 bg-white p-4 shadow-xl"
           style={{ top: hoverCard.top, left: hoverCard.left }}
           onMouseEnter={clearHideTimer}
           onMouseLeave={scheduleHideCard}
@@ -626,9 +631,12 @@ export function TextEditor({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                Hovered Word
+                Word Help
               </p>
               <h3 className="mt-1 text-lg font-semibold text-slate-900">{hoverCard.word}</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Click another word to switch help, or click outside to close this panel.
+              </p>
             </div>
             <button
               type="button"
@@ -642,7 +650,7 @@ export function TextEditor({
 
           <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2">
             <p className="text-xs font-medium uppercase tracking-wide text-amber-800">
-              Syllable-Like Chunks
+              Say It In Parts
             </p>
             <p className="mt-1 text-base font-semibold text-amber-950">
               {hoverCard.breakdown.join(' - ')}
@@ -652,13 +660,15 @@ export function TextEditor({
           {hoverCard.phoneticHint && (
             <div className="mt-3 rounded-lg bg-sky-50 px-3 py-2">
               <p className="text-xs font-medium uppercase tracking-wide text-sky-800">
-                Sounds Like
+                Simple Pronunciation
               </p>
               <p className="mt-1 text-base font-semibold text-sky-950">
                 {hoverCard.phoneticHint}
               </p>
             </div>
           )}
+
+          {renderSimpleDefinition(hoverCard.word)}
 
           {renderMorphologySummary(hoverCard.morphology)}
 
@@ -695,10 +705,14 @@ export function TextEditor({
           onInput={handleInput}
           onClick={handleEditorClick}
           onMouseMove={handleEditorMouseMove}
-          className={`min-h-full p-8 focus:outline-none whitespace-pre-wrap break-words ${
+          className={`mx-auto min-h-full max-w-4xl focus:outline-none whitespace-pre-wrap break-words ${
             wordHighlight ? 'word-highlight' : ''
           }`}
-          style={{ ...editorStyle, backgroundColor: 'transparent' }}
+          style={{
+            ...editorStyle,
+            backgroundColor: 'transparent',
+            padding: readingMode ? '7rem 3.5rem 5rem' : '3rem 3rem 4rem',
+          }}
         />
       </div>
     </div>
@@ -775,11 +789,34 @@ function renderDifficultySummary(word: string) {
   return (
     <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2">
       <p className="text-xs font-medium uppercase tracking-wide text-rose-700">
-        Why This May Feel Harder
+        Why This May Feel Tricky
       </p>
       <p className="mt-1 text-sm text-rose-900">
         {difficulty.reasons.join(', ')}
       </p>
+    </div>
+  );
+}
+
+function renderSimpleDefinition(word: string) {
+  const definition = getSimpleDefinition(word);
+  if (!definition) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-lg bg-stone-100 px-3 py-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-stone-600">
+        Easy Meaning
+      </p>
+      <p className="mt-1 text-sm text-stone-900">
+        {definition.meaning}
+      </p>
+      {definition.example && (
+        <p className="mt-2 text-sm text-stone-600">
+          {definition.example}
+        </p>
+      )}
     </div>
   );
 }

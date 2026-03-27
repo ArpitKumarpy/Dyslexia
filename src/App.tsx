@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { ArrowLeft, LifeBuoy, PanelLeftClose, Volume2 } from 'lucide-react';
 import { ControlPanel } from './components/ControlPanel';
 import { TextEditor } from './components/TextEditor/TextEditor';
 import { DocumentModal } from './components/DocumentModal';
+import { SupportHub } from './components/SupportHub';
 import { ReaderSettings, Document } from './types';
 import { supabase } from './lib/supabase';
 import { extractTextFromPdf } from './utils/pdfParser';
@@ -26,11 +28,13 @@ function App() {
   const [showDifficultWords, setShowDifficultWords] = useState(false);
   const [showSentenceSimplification, setShowSentenceSimplification] = useState(false);
   const [headTrackingEnabled, setHeadTrackingEnabled] = useState(false);
+  const [readingMode, setReadingMode] = useState(false);
   const [hoverPronunciationRate, setHoverPronunciationRate] = useState(() => {
     const storedRate = localStorage.getItem('hover_pronunciation_rate');
     return storedRate ? parseFloat(storedRate) : 0.85;
   });
   const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [showSupportHub, setShowSupportHub] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -130,10 +134,8 @@ function App() {
     const title = prompt('Enter document title:', 'Untitled Document');
     if (!title) return;
 
-    const sessionId = getSessionId();
-
     if (currentDocId) {
-      await supabase
+      const { error } = await supabase
         .from('documents')
         .update({
           title,
@@ -141,19 +143,29 @@ function App() {
           updated_at: new Date().toISOString(),
         })
         .eq('id', currentDocId);
+
+      if (error) {
+        alert(`Could not save the document: ${error.message}`);
+        return;
+      }
     } else {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('documents')
         .insert({
           title,
           content,
-          user_id: sessionId,
         })
         .select()
         .single();
 
+      if (error) {
+        alert(`Could not save the document: ${error.message}`);
+        return;
+      }
+
       if (data) {
         setCurrentDocId(data.id);
+        setDocuments((current) => [data, ...current.filter((doc) => doc.id !== data.id)]);
       }
     }
 
@@ -161,10 +173,15 @@ function App() {
   };
 
   const handleLoadDocuments = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('documents')
       .select('*')
       .order('updated_at', { ascending: false });
+
+    if (error) {
+      alert(`Could not load documents: ${error.message}`);
+      return;
+    }
 
     setDocuments(data || []);
     setShowDocumentModal(true);
@@ -178,7 +195,12 @@ function App() {
   const handleDeleteDocument = async (id: string) => {
     if (!confirm('Are you sure you want to delete this document?')) return;
 
-    await supabase.from('documents').delete().eq('id', id);
+    const { error } = await supabase.from('documents').delete().eq('id', id);
+    if (error) {
+      alert(`Could not delete the document: ${error.message}`);
+      return;
+    }
+
     setDocuments(documents.filter(doc => doc.id !== id));
 
     if (currentDocId === id) {
@@ -251,41 +273,95 @@ function App() {
   };
 
   return (
-    <div className="h-screen flex overflow-hidden">
-      <ControlPanel
-        settings={settings}
-        onSettingsChange={handleSettingsChange}
-        onPdfUpload={handlePdfUpload}
-        onSaveDocument={handleSaveDocument}
-        onLoadDocuments={handleLoadDocuments}
-        onTextToSpeech={handleTextToSpeech}
-        showReadingGuide={showReadingGuide}
-        onToggleReadingGuide={() => setShowReadingGuide(!showReadingGuide)}
-        focusMode={focusMode}
-        onToggleFocusMode={() => setFocusMode(!focusMode)}
-        wordHighlight={wordHighlight}
-        onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
-        showDifficultWords={showDifficultWords}
-        onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
-        showSentenceSimplification={showSentenceSimplification}
-        onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
-        headTrackingEnabled={headTrackingEnabled}
-        onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
-      />
-      <TextEditor
-        content={content}
-        onContentChange={setContent}
-        settings={settings}
-        showReadingGuide={showReadingGuide}
-        focusMode={focusMode}
-        wordHighlight={wordHighlight}
-        showDifficultWords={showDifficultWords}
-        showSentenceSimplification={showSentenceSimplification}
-        headTrackingEnabled={headTrackingEnabled}
-        activeSentenceIndex={activeSentenceIndex}
-        hoverPronunciationRate={hoverPronunciationRate}
-        onHoverPronunciationRateChange={setHoverPronunciationRate}
-      />
+    <div className="relative h-screen overflow-hidden bg-stone-100">
+      <div className="flex h-full overflow-hidden">
+        {!readingMode && (
+          <ControlPanel
+            settings={settings}
+            onSettingsChange={handleSettingsChange}
+            onPdfUpload={handlePdfUpload}
+            onSaveDocument={handleSaveDocument}
+            onLoadDocuments={handleLoadDocuments}
+            onTextToSpeech={handleTextToSpeech}
+            showReadingGuide={showReadingGuide}
+            onToggleReadingGuide={() => setShowReadingGuide(!showReadingGuide)}
+            focusMode={focusMode}
+            onToggleFocusMode={() => setFocusMode(!focusMode)}
+            wordHighlight={wordHighlight}
+            onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
+            showDifficultWords={showDifficultWords}
+            onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
+            showSentenceSimplification={showSentenceSimplification}
+            onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
+            headTrackingEnabled={headTrackingEnabled}
+            onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
+            readingMode={readingMode}
+            onToggleReadingMode={() => setReadingMode(!readingMode)}
+            isSpeaking={isSpeaking}
+            onOpenSupportHub={() => setShowSupportHub(true)}
+          />
+        )}
+        <TextEditor
+          content={content}
+          onContentChange={setContent}
+          settings={settings}
+          showReadingGuide={showReadingGuide}
+          focusMode={focusMode}
+          wordHighlight={wordHighlight}
+          showDifficultWords={showDifficultWords}
+          showSentenceSimplification={showSentenceSimplification}
+          headTrackingEnabled={headTrackingEnabled}
+          activeSentenceIndex={activeSentenceIndex}
+          hoverPronunciationRate={hoverPronunciationRate}
+          onHoverPronunciationRateChange={setHoverPronunciationRate}
+          readingMode={readingMode}
+        />
+      </div>
+      {readingMode && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex justify-center px-4 pt-4">
+          <div className="pointer-events-auto flex w-full max-w-4xl items-center justify-between rounded-full border border-stone-200 bg-white px-4 py-3 shadow-lg">
+            <div className="flex items-center gap-3 text-sm text-stone-700">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 text-stone-600">
+                <PanelLeftClose size={18} />
+              </span>
+              <div>
+                <p className="font-semibold text-stone-900">Reading Mode</p>
+                <p className="text-xs text-stone-500">
+                  Calm reading layout with fewer controls and less visual noise.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSupportHub(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-stone-100 px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200"
+              >
+                <LifeBuoy size={16} />
+                Support Hub
+              </button>
+              <button
+                type="button"
+                onClick={handleTextToSpeech}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                  isSpeaking ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                }`}
+              >
+                <Volume2 size={16} />
+                {isSpeaking ? 'Stop Audio' : 'Read Aloud'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setReadingMode(false)}
+                className="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+              >
+                <ArrowLeft size={16} />
+                Exit Reading Mode
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showDocumentModal && (
         <DocumentModal
           documents={documents}
@@ -293,6 +369,9 @@ function App() {
           onLoad={handleLoadDocument}
           onDelete={handleDeleteDocument}
         />
+      )}
+      {showSupportHub && (
+        <SupportHub onClose={() => setShowSupportHub(false)} />
       )}
     </div>
   );
