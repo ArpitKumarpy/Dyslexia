@@ -38,7 +38,7 @@ type HoverCard = {
   width: number;
 };
 
-type HeadTrackingStatus = 'idle' | 'starting' | 'active' | 'error';
+type HeadTrackingStatus = 'idle' | 'starting' | 'calibrating' | 'active' | 'error';
 
 type WordTarget = {
   element: HTMLElement;
@@ -48,6 +48,23 @@ type WordTarget = {
 
 const HEAD_TRACKING_SAMPLE_MS = 220;
 const HEAD_TRACKING_STABILITY_THRESHOLD = 2;
+const HEAD_TRACKING_CALIBRATION_MS = 2800;
+const HEAD_TRACKING_MIN_CALIBRATION_SAMPLES = 6;
+const HEAD_TRACKING_NEUTRAL_TARGET_Y = 0.34;
+const HEAD_TRACKING_VERTICAL_GAIN = 1.35;
+const HEAD_TRACKING_MIN_Y = 0.12;
+const HEAD_TRACKING_MAX_Y = 0.9;
+const IRIS_VERTICAL_GAIN = 0.16;
+const LEFT_EYE_INDICES = {
+  top: 159,
+  bottom: 145,
+  irisCenter: 468,
+};
+const RIGHT_EYE_INDICES = {
+  top: 386,
+  bottom: 374,
+  irisCenter: 473,
+};
 const MEDIAPIPE_VERSION = '0.10.34';
 const MEDIAPIPE_WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
 const FACE_LANDMARKER_MODEL_URL =
@@ -83,6 +100,10 @@ export function TextEditor({
   const trackingFrameRef = useRef<number | null>(null);
   const lastTrackingSampleRef = useRef(0);
   const isTrackingFramePendingRef = useRef(false);
+  const headTrackingStatusRef = useRef<HeadTrackingStatus>('idle');
+  const calibrationStartedAtRef = useRef<number | null>(null);
+  const calibrationSamplesRef = useRef<number[]>([]);
+  const learnedBaselineRef = useRef<number | null>(null);
   const isUserTyping = useRef(false);
   const hideTimerRef = useRef<number | null>(null);
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
@@ -90,6 +111,11 @@ export function TextEditor({
   const [clauseFocusBySentence, setClauseFocusBySentence] = useState<Record<number, number>>({});
   const [headTrackingStatus, setHeadTrackingStatus] = useState<HeadTrackingStatus>('idle');
   const [headTrackingError, setHeadTrackingError] = useState<string | null>(null);
+  const [calibrationProgress, setCalibrationProgress] = useState(0);
+
+  useEffect(() => {
+    headTrackingStatusRef.current = headTrackingStatus;
+  }, [headTrackingStatus]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -254,7 +280,11 @@ export function TextEditor({
 
         faceLandmarkerRef.current = await createFaceLandmarkerWithFallback(vision, filesetResolver);
 
-        setHeadTrackingStatus('active');
+        calibrationStartedAtRef.current = performance.now();
+        calibrationSamplesRef.current = [];
+        learnedBaselineRef.current = null;
+        setCalibrationProgress(0);
+        setHeadTrackingStatus('calibrating');
         trackingFrameRef.current = window.requestAnimationFrame(runHeadTrackingLoop);
       } catch (error) {
         setHeadTrackingStatus('error');
@@ -310,6 +340,10 @@ export function TextEditor({
     isTrackingFramePendingRef.current = false;
     pendingHeadSentenceIndexRef.current = null;
     pendingHeadSentenceHitsRef.current = 0;
+    calibrationStartedAtRef.current = null;
+    calibrationSamplesRef.current = [];
+    learnedBaselineRef.current = null;
+    setCalibrationProgress(0);
     faceLandmarkerRef.current?.close();
     faceLandmarkerRef.current = null;
 
@@ -379,6 +413,11 @@ export function TextEditor({
 
     try {
       const result = landmarker.detectForVideo(webcam, now);
+      if (headTrackingStatusRef.current === 'calibrating') {
+        updateCalibrationState(result, now);
+        return;
+      }
+
       const sentenceIndex = findHeadTrackedSentenceIndex(result);
       if (sentenceIndex === null) {
         pendingHeadSentenceIndexRef.current = null;
@@ -408,13 +447,42 @@ export function TextEditor({
     }
   };
 
+  const updateCalibrationState = (result: FaceLandmarkerResult | null, now: number) => {
+    const faceCenterY = getTrackedFaceCenterY(result?.faceLandmarks[0]);
+    const startedAt = calibrationStartedAtRef.current ?? now;
+    calibrationStartedAtRef.current = startedAt;
+
+    if (faceCenterY !== null) {
+      calibrationSamplesRef.current.push(faceCenterY);
+    }
+
+    const elapsed = now - startedAt;
+    const progress = clamp(elapsed / HEAD_TRACKING_CALIBRATION_MS, 0, 1);
+    setCalibrationProgress(progress);
+
+    if (elapsed < HEAD_TRACKING_CALIBRATION_MS) {
+      return;
+    }
+
+    if (calibrationSamplesRef.current.length < HEAD_TRACKING_MIN_CALIBRATION_SAMPLES) {
+      calibrationStartedAtRef.current = now;
+      calibrationSamplesRef.current = [];
+      setCalibrationProgress(0);
+      return;
+    }
+
+    learnedBaselineRef.current = getAverage(calibrationSamplesRef.current);
+    setCalibrationProgress(1);
+    setHeadTrackingStatus('active');
+  };
+
   const findHeadTrackedSentenceIndex = (result: FaceLandmarkerResult | null): number | null => {
     if (!result || !editorRef.current || !editorScrollRef.current) {
       return null;
     }
 
-    const trackedFaceY = getTrackedFaceCenterY(result.faceLandmarks[0]);
-    if (trackedFaceY === null) {
+    const trackedAttentionY = getTrackedAttentionY(result.faceLandmarks[0], learnedBaselineRef.current);
+    if (trackedAttentionY === null) {
       return null;
     }
 
@@ -439,7 +507,7 @@ export function TextEditor({
     }
 
     const scrollRect = editorScrollRef.current.getBoundingClientRect();
-    const targetY = scrollRect.top + trackedFaceY * scrollRect.height;
+    const targetY = scrollRect.top + trackedAttentionY * scrollRect.height;
 
     let nearestSentence: HTMLElement | null = null;
     let nearestDistance = Number.POSITIVE_INFINITY;
@@ -562,6 +630,10 @@ export function TextEditor({
   };
 
   const showHeadTrackingStatus = headTrackingEnabled || headTrackingStatus === 'error';
+  const calibrationSecondsRemaining = Math.max(
+    1,
+    Math.ceil((1 - calibrationProgress) * (HEAD_TRACKING_CALIBRATION_MS / 1000))
+  );
 
   return (
     <div
@@ -619,6 +691,7 @@ export function TextEditor({
           </p>
           <p className="mt-1 font-medium text-slate-900">
             {headTrackingStatus === 'starting' && 'Starting webcam and preparing line tracking...'}
+            {headTrackingStatus === 'calibrating' && 'Choose your normal reading posture and hold still for a moment.'}
             {headTrackingStatus === 'active' && 'Active. Move your head gently to shift the highlighted reading line.'}
             {headTrackingStatus === 'error' && (headTrackingError ?? 'Head tracking is unavailable right now.')}
             {headTrackingStatus === 'idle' && 'Off'}
@@ -626,6 +699,33 @@ export function TextEditor({
           <p className="mt-1 text-xs text-slate-600">
             Webcam frames stay in the browser for this session and are cleared when you turn the feature off.
           </p>
+        </div>
+      )}
+
+      {headTrackingStatus === 'calibrating' && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center px-4">
+          <div className="pointer-events-auto w-full max-w-md rounded-[1.75rem] border border-stone-200 bg-white p-5 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+              Head Tracking Setup
+            </p>
+            <h3 className="mt-2 text-xl font-semibold text-slate-900">Hold your natural reading posture</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Sit the way you would normally read, keep your face in view, and stay steady for a few seconds while we learn your neutral position.
+            </p>
+            <div className="mt-4">
+              <div className="h-2 overflow-hidden rounded-full bg-stone-200">
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-[width] duration-200"
+                  style={{ width: `${Math.max(8, calibrationProgress * 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-sm font-medium text-slate-700">
+                {calibrationProgress >= 1
+                  ? 'Calibration complete. Starting tracking...'
+                  : `Hold steady for about ${calibrationSecondsRemaining} more second${calibrationSecondsRemaining === 1 ? '' : 's'}.`}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -939,6 +1039,94 @@ function getTrackedFaceCenterY(landmarks: NormalizedLandmark[] | undefined): num
   }
 
   return clamp((minY + maxY) / 2, 0, 1);
+}
+
+function getTrackedAttentionY(
+  landmarks: NormalizedLandmark[] | undefined,
+  learnedBaselineY: number | null
+): number | null {
+  const faceCenterY = getTrackedFaceCenterY(landmarks);
+  if (faceCenterY === null) {
+    return null;
+  }
+
+  const remappedHeadY = remapHeadTrackingY(faceCenterY, learnedBaselineY);
+  const irisOffsetY = getIrisVerticalOffset(landmarks);
+
+  if (irisOffsetY === null) {
+    return remappedHeadY;
+  }
+
+  return clamp(
+    remappedHeadY + irisOffsetY * IRIS_VERTICAL_GAIN,
+    HEAD_TRACKING_MIN_Y,
+    HEAD_TRACKING_MAX_Y
+  );
+}
+
+function remapHeadTrackingY(faceCenterY: number, learnedBaselineY: number | null): number {
+  const centeredY = faceCenterY - (learnedBaselineY ?? 0.5);
+  return clamp(
+    HEAD_TRACKING_NEUTRAL_TARGET_Y + centeredY * HEAD_TRACKING_VERTICAL_GAIN,
+    HEAD_TRACKING_MIN_Y,
+    HEAD_TRACKING_MAX_Y
+  );
+}
+
+function getIrisVerticalOffset(landmarks: NormalizedLandmark[] | undefined): number | null {
+  if (!landmarks || landmarks.length <= RIGHT_EYE_INDICES.irisCenter) {
+    return null;
+  }
+
+  const leftEyeOffset = getEyeVerticalOffset(landmarks, LEFT_EYE_INDICES);
+  const rightEyeOffset = getEyeVerticalOffset(landmarks, RIGHT_EYE_INDICES);
+
+  if (leftEyeOffset === null && rightEyeOffset === null) {
+    return null;
+  }
+
+  if (leftEyeOffset === null) {
+    return rightEyeOffset;
+  }
+
+  if (rightEyeOffset === null) {
+    return leftEyeOffset;
+  }
+
+  return (leftEyeOffset + rightEyeOffset) / 2;
+}
+
+function getAverage(values: number[]): number {
+  if (values.length === 0) {
+    return 0.5;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function getEyeVerticalOffset(
+  landmarks: NormalizedLandmark[],
+  indices: { top: number; bottom: number; irisCenter: number }
+): number | null {
+  const top = landmarks[indices.top];
+  const bottom = landmarks[indices.bottom];
+  const irisCenter = landmarks[indices.irisCenter];
+
+  if (!top || !bottom || !irisCenter) {
+    return null;
+  }
+
+  const eyeHeight = Math.abs(bottom.y - top.y);
+  if (eyeHeight < 0.0001) {
+    return null;
+  }
+
+  const irisPosition = (irisCenter.y - top.y) / (bottom.y - top.y);
+  if (!Number.isFinite(irisPosition)) {
+    return null;
+  }
+
+  return clamp(irisPosition - 0.5, -1, 1);
 }
 
 function getHeadTrackingErrorMessage(error: unknown): string {
