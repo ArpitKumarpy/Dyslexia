@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
-import { Volume2 } from 'lucide-react';
+import { Check, Pencil, Volume2 } from 'lucide-react';
 import type { FaceLandmarker, FaceLandmarkerResult, NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { ReaderSettings } from '../../types';
 import { tokenizeText } from '../../utils/tokenizeText';
@@ -112,10 +112,34 @@ export function TextEditor({
   const [headTrackingStatus, setHeadTrackingStatus] = useState<HeadTrackingStatus>('idle');
   const [headTrackingError, setHeadTrackingError] = useState<string | null>(null);
   const [calibrationProgress, setCalibrationProgress] = useState(0);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [mobileEditingEnabled, setMobileEditingEnabled] = useState(false);
 
   useEffect(() => {
     headTrackingStatusRef.current = headTrackingStatus;
   }, [headTrackingStatus]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(pointer: coarse)');
+    const updateTouchState = () => {
+      setIsTouchDevice(mediaQuery.matches || 'ontouchstart' in window);
+    };
+
+    updateTouchState();
+    mediaQuery.addEventListener('change', updateTouchState);
+
+    return () => mediaQuery.removeEventListener('change', updateTouchState);
+  }, []);
+
+  useEffect(() => {
+    if (!isTouchDevice) {
+      setMobileEditingEnabled(false);
+    }
+  }, [isTouchDevice]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -309,6 +333,22 @@ export function TextEditor({
     onContentChange(editorRef.current.innerText);
     requestAnimationFrame(() => {
       isUserTyping.current = false;
+    });
+  };
+
+  const toggleMobileEditing = () => {
+    if (!isTouchDevice) {
+      return;
+    }
+
+    setMobileEditingEnabled((current) => {
+      const next = !current;
+      if (!next) {
+        editorRef.current?.blur();
+      } else {
+        requestAnimationFrame(() => editorRef.current?.focus());
+      }
+      return next;
     });
   };
 
@@ -634,6 +674,7 @@ export function TextEditor({
     1,
     Math.ceil((1 - calibrationProgress) * (HEAD_TRACKING_CALIBRATION_MS / 1000))
   );
+  const isEditorEditable = !isTouchDevice || mobileEditingEnabled;
 
   return (
     <div
@@ -800,6 +841,23 @@ export function TextEditor({
         </div>
       )}
 
+      {isTouchDevice && (
+        <div className="pointer-events-none absolute bottom-4 right-4 z-20">
+          <button
+            type="button"
+            onClick={toggleMobileEditing}
+            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-3 text-sm font-medium shadow-lg transition-colors ${
+              mobileEditingEnabled
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'bg-stone-900 text-white hover:bg-stone-700'
+            }`}
+          >
+            {mobileEditingEnabled ? <Check size={16} /> : <Pencil size={16} />}
+            {mobileEditingEnabled ? 'Done Editing' : 'Edit Text'}
+          </button>
+        </div>
+      )}
+
       <div
         ref={editorScrollRef}
         className="h-full overflow-y-auto"
@@ -808,13 +866,15 @@ export function TextEditor({
       >
         <div
           ref={editorRef}
-          contentEditable
+          contentEditable={isEditorEditable}
           suppressContentEditableWarning
           spellCheck={false}
           onInput={handleInput}
           onClick={handleEditorClick}
           onMouseMove={handleEditorMouseMove}
-          className={`mx-auto min-h-full w-full max-w-4xl focus:outline-none whitespace-pre-wrap break-words ${
+          className={`mx-auto min-h-full w-full max-w-4xl whitespace-pre-wrap break-words ${
+            isEditorEditable ? 'focus:outline-none' : 'focus:outline-none select-text'
+          } ${
             wordHighlight ? 'word-highlight' : ''
           }`}
           style={{

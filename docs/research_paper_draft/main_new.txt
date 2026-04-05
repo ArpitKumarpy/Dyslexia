@@ -1,0 +1,721 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{multirow}
+\usepackage[space]{grffile}
+\usepackage{array}
+
+\usepackage{placeins} % <--- REQUIRED FOR FIXING THE FLOAT ISSUE
+\usepackage{float}    % Required for [H] placement
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% --- CUSTOM AUTHOR BREAK ---
+\makeatletter
+\newcommand{\linebreakand}{%
+  \end{@IEEEauthorhalign}
+  \hfill\mbox{}\par
+  \mbox{}\hfill\begin{@IEEEauthorhalign}
+}
+\makeatother
+
+\begin{document}
+
+% ==========================
+% TITLE
+% ==========================
+\title{Synapse: A Multimodal Assistive Reading System with Hybrid Attention Tracking and Cognitive Difficulty Prediction}
+
+% ==========================
+% AUTHORS
+% ==========================
+\author{
+    % --- Professor (Top Center) ---
+    \IEEEauthorblockN{1\textsuperscript{st} Ms. Bhanu Verma}
+    \IEEEauthorblockA{
+    \textit{Asst. Professor, Dept. of CS}\\
+    \textit{IMS Engineering College}\\
+    Ghaziabad, India\\
+    bhanu.verma@imsec.ac.in}
+    \and
+
+    \IEEEauthorblockN{2\textsuperscript{nd} Ms. Monika Nagar}
+    \IEEEauthorblockA{
+    \textit{Asst. Professor, Dept. of CS}\\
+    \textit{IMS Engineering College}\\
+    Ghaziabad, India\\
+    Monika.nagar6@gmail.com}
+    \linebreakand
+
+    % --- Students Row ---
+
+    \IEEEauthorblockN{3\textsuperscript{rd} Arpit Kumar}
+    \IEEEauthorblockA{
+    \textit{Dept. of CSE--AIML}\\
+    \textit{IMS Engineering College}\\
+    Ghaziabad, India\\
+    arpitkumar.py@gmail.com}
+    \and
+
+    \IEEEauthorblockN{4\textsuperscript{th} Khushi Agarwal}
+    \IEEEauthorblockA{
+    \textit{Dept. of CSE--AIML}\\
+    \textit{IMS Engineering College}\\
+    Ghaziabad, India\\
+    khushiagarwal192004@gmail.com}
+    \and
+
+    \IEEEauthorblockN{5\textsuperscript{th} Anirudh Singh Tomar}
+    \IEEEauthorblockA{
+    \textit{Dept. of CSE--AIML}\\
+    \textit{IMS Engineering College}\\
+    Ghaziabad, India\\
+    anirudhsinghtomar10@gmail.com}
+}
+
+\maketitle
+
+% ==========================
+% ABSTRACT
+% ==========================
+
+\begin{abstract}
+Assistive tools for dyslexia span a wide range---speech aids, adaptive text displays, behavioral screening---yet they almost always work in isolation. A person who needs help reading typically has to stitch together several separate applications, each addressing only part of the problem. Synapse is our attempt to change that. It is a multimodal assistive reading system that brings together real-time accessibility features, word-level cognitive scaffolding, and browser-native attention tracking within a single machine-learning-informed platform. At its core is a serverless Assistive Reader built on a tokenized reading surface: every word in the document becomes an individually addressable element, enabling synchronized visual overlays, dual-mode audio support, syllable chunking, phonetic simplification, morphological decomposition, and heuristic difficulty scoring---all without touching the underlying text. Beyond static visual aids, we implemented a hybrid head-pose and iris-tracking pipeline using MediaPipe FaceLandmarker~\cite{22}, complete with an adaptive calibration step that learns each user's natural reading posture. Everything runs locally in the browser, so no video data ever leaves the device. On the analysis side, we trained and evaluated cognitive difficulty models on the ZuCo dataset~\cite{16}, finding that behavioral eye-tracking features dwarf lexical ones in predictive power (AUC 0.9989 with XGBoost~\cite{17}). Synapse also includes sentence-level clause simplification, a curated support hub with trusted dyslexia resources, and a responsive layout that holds up on mobile. Taken together, these pieces form a privacy-first, unified architecture for reading support that can adapt to the user rather than asking the user to adapt to it.
+\end{abstract}
+
+\section{Introduction}
+
+Dyslexia affects somewhere between 5 and 15\% of the population worldwide~\cite{3}. Its effects show up daily---in struggling to decode unfamiliar words, losing track of a line mid-sentence, or reading the same paragraph three times before it sticks. For decades, the standard response has been clinical screening: structured tests like the Adult Reading History Questionnaire (ARHQ)~\cite{1} and the Dyslexia Screening Test (DST)~\cite{2} that produce a score and a label. These tools are well-validated, but they are also a snapshot in time---a one-off assessment rather than ongoing support.
+
+Technological aids have grown to fill some of the gap: text-to-speech engines, adjustable fonts, colored overlays, eye-tracking screenings. The trouble is that each of these exists in its own silo. A user who wants the benefits of a dyslexia-friendly typeface, a reading ruler, and synchronized audio has to manage three different applications. That extra coordination overhead is precisely the kind of cognitive load these tools are supposed to reduce.
+
+This paper addresses that fragmentation directly. We make three concrete contributions:
+\begin{enumerate}
+    \item A \textbf{unified architectural framework} that combines typographic accessibility, word-level cognitive scaffolding, sentence-level simplification, and browser-native attention tracking within a single privacy-preserving system.
+    \item A \textbf{deployed hybrid attention-tracking pipeline} using MediaPipe FaceLandmarker with an adaptive calibration protocol, blending head-pose and iris signals for sentence-level reading guidance---bringing attention tracking to ordinary webcams for the first time in an integrated reading tool.
+    \item A \textbf{rigorous experimental evaluation} on the ZuCo dataset that quantifies how much more predictive behavioral features are than lexical ones for cognitive difficulty, giving a clear motivation for embedding real-time behavioral observation into everyday assistive systems.
+\end{enumerate}
+
+\subsection{The Need for Multimodal Integration}
+As comprehensive reviews of the field have noted, assistive dyslexia technology suffers from persistent fragmentation~\cite{9}. Most tools are built around a single sensing or delivery modality, which limits how well they can capture the full picture of a reader's experience. There is a clear opening for a system that weaves typographic adjustments, behavioral observation, and word-level cognitive support into one coherent experience. Table~\ref{tab:taxonomy} maps out the major modality categories and their characteristic limitations.
+
+\begin{table*}[htbp]
+\caption{Comparative Taxonomy of Dyslexia Technologies}
+\centering
+\begin{tabular}{|p{2.5cm}|p{3cm}|p{3.5cm}|p{3.5cm}|p{3cm}|}
+\hline
+\textbf{Modality} & \textbf{Primary Focus} & \textbf{Key Strengths} & \textbf{Commonly Reported Limitations} & \textbf{Typical Isolation Pattern} \\
+\hline
+Speech-Based &
+Phonological processing, fluency &
+High sensitivity to decoding difficulty; strong for early literacy support &
+Limited visual or orthographic insight; metrics are modality-specific &
+Rarely combined with text or vision signals \\
+\hline
+Text-Based &
+Reading and writing assistance &
+Reduces cognitive load; improves everyday accessibility &
+Limited screening capability; narrow linguistic framing &
+Operates independently of speech and vision cues \\
+\hline
+Vision-Based &
+Visual attention and reading behavior &
+Provides a non-linguistic screening angle &
+Requires dedicated hardware; hard to deploy broadly &
+Outputs rarely aligned with linguistic indicators \\
+\hline
+Applied Multimodal &
+Usability and deployment &
+Shows that integration is feasible &
+Lacks a formal comparative framework &
+Integration is operational rather than analytical \\
+\hline
+\end{tabular}
+\label{tab:taxonomy}
+\end{table*}
+
+\FloatBarrier
+% ==========================
+% SECTION II: RELATED WORK
+% ==========================
+\section{Related Work}
+\label{sec:related_work}
+Rather than cataloguing every standalone dyslexia tool, this section focuses on the key modality categories and explains why their historical separation creates the opening that Synapse is designed to fill.
+
+\subsection{Speech-Based Technologies}
+Speech-based systems go after the phonological deficits that sit at the heart of most dyslexia profiles~\cite{3}. They use voice recognition and acoustic analysis to evaluate pronunciation, speaking rate, and reading fluency. Research has shown that acoustic features can reliably flag decoding difficulty and identify speech pattern irregularities associated with dyslexia~\cite{7,10}. Confidence estimation algorithms in speech recognition can even pinpoint moments of hesitation---a useful proxy for where a reader is struggling~\cite{12}. The limitation is that these indicators are almost never connected to what is happening on the screen at the same moment.
+
+\subsection{Text-Centric and Language-Oriented Systems}
+Text-based support aims to lower the cognitive cost of decoding~\cite{14,15}. Typical interventions include warm or tinted background colors to reduce visual stress~\cite{6} and specialized typefaces to improve letter discrimination~\cite{5}. The OpenDyslexic font~\cite{13}, shown in \textbf{Fig.}~\ref{fig:opendyslexic}, gives each letter a weighted base that makes it harder for readers to mentally rotate or flip characters. These tools genuinely help---but they are static. They apply the same treatment to every word regardless of whether that word is posing a problem.
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{open_dyslexic.png}
+    \caption{OpenDyslexic Typeface~\cite{13}}
+    \label{fig:opendyslexic}
+\end{figure}
+
+\subsection{Vision-Based and Behavioral Screening Methods}
+Vision-based approaches look at reading through the lens of eye movement, drawing on theories like the magnocellular deficit hypothesis~\cite{4}. Eye-tracking studies have repeatedly shown that dyslexic readers fixate longer, have less stable gaze, and make more backward regressions than typical readers~\cite{8}. The predictive power is real, but the hardware requirements have kept these systems in controlled research settings rather than everyday use.
+
+More recently, browser-native face mesh models---MediaPipe FaceLandmarker in particular~\cite{22}---have made it possible to detect 478 facial landmarks and 10 iris landmarks per frame entirely in WebAssembly, without any dedicated hardware. What has not been explored is how to connect this kind of browser-local tracking to a reading interface where each word and sentence is individually addressable in the DOM. That connection is one of the core contributions of this work.
+
+\subsection{Word-Level Cognitive Scaffolding}
+There is solid evidence that helping readers break words into parts improves both comprehension and vocabulary acquisition. Morphological awareness training---learning to recognize prefixes, roots, and suffixes---has been shown to help dyslexic readers in particular~\cite{23}. Similarly, syllable-based decoding strategies reduce the cognitive load of approaching an unfamiliar word~\cite{3}. The problem is that these strategies are usually delivered as separate educational programs, not as embedded features that activate the moment a reader encounters a difficult word in the text they are already reading.
+
+\FloatBarrier
+% ==========================
+% SECTION III: PROBLEM FORMULATION
+% ==========================
+\section{Problem Formulation}
+\label{sec:problem}
+
+Dyslexia is not a single difficulty---it is a cluster of challenges that show up differently in different people and in different reading contexts. The tools that exist today tend to address one piece of that cluster at a time, which creates three recurring problems.
+\begin{itemize}
+    \item \textbf{Disjointed Workflows:} Users who want multiple forms of support end up managing multiple tools. That coordination cost falls on the person who least needs extra cognitive burden.
+    \item \textbf{Static Assistance:} Most existing tools---standard TTS engines, fixed fonts, colored overlays---work the same way regardless of what the reader is actually experiencing at a given moment. They cannot tell when a sentence is causing friction, let alone respond to it.
+    \item \textbf{Hardware-Dependent Attention Tracking:} Clinical eye-tracking systems generate genuinely useful behavioral data, but they require hardware that is simply not accessible in everyday settings. Browser-based alternatives have historically been too noisy to be reliable.
+\end{itemize}
+
+Moving past these limitations requires more than patching individual tools. A useful modern assistive reader needs to meet four structural requirements:
+\begin{enumerate}
+    \item \textbf{Non-Intrusive Perceptual Assistance:} Visual and auditory support should reduce cognitive load without changing the underlying document text.
+    \item \textbf{Word-Level Structural Awareness:} The system needs to know where every word is on screen---not just as text in a buffer, but as a spatially addressable DOM element---so it can react to caret position, scroll behavior, and gaze direction in real time.
+    \item \textbf{Browser-Native Attention Tracking:} Attention guidance should work from a standard webcam, run entirely locally, and respect user privacy.
+    \item \textbf{Dynamic Difficulty Prediction:} Rather than offering the same help to every word, the system should learn from behavioral signals and proactively flag the passages most likely to cause difficulty.
+\end{enumerate}
+
+Table~\ref{tab:requirements} shows how each traditional limitation maps directly to one of these requirements.
+
+\begin{table}[htbp]
+\caption{Mapping Traditional Limitations to Synapse Architectural Requirements}
+\centering
+\begin{tabular}{|p{4cm}|p{4cm}|}
+\hline
+\textbf{Traditional System Limitation} & \textbf{Synapse Architectural Requirement} \\
+\hline
+Disjointed workflows across isolated, single-modality tools &
+Unified, frontend-first multimodal integration \\
+\hline
+Permanent mutation of underlying text &
+Non-intrusive, state-driven perceptual overlays \\
+\hline
+Inability to interact with individual words &
+Structural word-level awareness via tokenized DOM \\
+\hline
+Static, reactive accessibility filters &
+Dynamic cognitive difficulty prediction (ML-driven) \\
+\hline
+Privacy risks from remote biometric processing &
+Local, browser-based behavioral feature extraction \\
+\hline
+Clinical-grade hardware dependency for attention tracking &
+Browser-native hybrid head-pose and iris tracking \\
+\hline
+\end{tabular}
+\label{tab:requirements}
+\end{table}
+
+\FloatBarrier
+% ==========================
+% SECTION IV: UNIFIED SYSTEM ARCHITECTURE
+% ==========================
+\section{Unified System Architecture}
+\label{sec:architecture}
+
+Synapse is built as a frontend-heavy, real-time platform. The design deliberately avoids the pattern of shipping text to a backend for processing and waiting for a response---every perceptual feature, attention signal, and interaction event is handled directly in the browser. Three principles shaped the architecture.
+
+\subsection{Architectural Design Principles}
+\begin{itemize}
+    \item \textbf{Frontend-First Execution:} All real-time behavior---perception layers, attention tracking, interaction analytics---runs in the browser. This keeps feature latency under 50\,ms and means no webcam frames or behavioral data ever reach an external server.
+    \item \textbf{State-Driven Rendering:} A single central controller manages all user preferences, document content, and session state. Changes to any setting immediately propagate to the view layer as updated CSS properties, so the reading surface always reflects the user's current configuration without a page reload.
+    \item \textbf{Decoupled Persistence:} The backend exists purely for storing documents and preferences. Even in a low-bandwidth classroom, the reading tools remain fully functional.
+\end{itemize}
+
+\subsection{High-Level Technology Stack}
+The system is a serverless web application, as illustrated in Fig.~\ref{fig:architecture}. The frontend is built with React 18 and TypeScript for type-safe state management, styled with Tailwind CSS. The attention-tracking pipeline is loaded on demand as a dynamically imported WebAssembly module.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{b5346554-dc3b-4810-a99f-a5d80418a14f.jpg}
+    \caption{High-level unified architecture showing how the frontend state controller, reading interface, attention-tracking pipeline, and Supabase persistence layer interact.}
+    \label{fig:architecture}
+\end{figure}
+
+A central \texttt{App.tsx} controller acts as the single source of truth for user preferences, session data, and document content. Persistent storage is handled by Supabase (PostgreSQL), which syncs reading configurations and saved documents anonymously without requiring the user to create an account.
+
+\subsection{Structural Word-Level Awareness}
+The most important architectural decision in Synapse is the abandonment of a standard \texttt{<textarea>} in favor of a tokenized \texttt{contentEditable} surface. When text is loaded, each word is individually wrapped in a \texttt{<span>} element tagged with \texttt{data-word="true"}. This turns a flat string into a queryable tree of individually addressable units.
+
+At the same time, the text is segmented into sentences using a regex-based splitter (\texttt{/[\^{}.!?\textbackslash n]+(?:[.!?]+["')\textbackslash]]*)?|\textbackslash n+/g}), and each sentence span receives a \texttt{data-sentence-index} attribute. The result is a dual-level structure---word-level and sentence-level---that supports both the word-help panel and the attention-tracking system without ever modifying the source text.
+
+\subsection{State Management and Persistence Synchronization}
+Data flows through the application in one direction, governed by \texttt{App.tsx}. To avoid login friction for users who may find account creation cognitively taxing, the system generates a unique \texttt{session\_id} on first load and stores it in \texttt{localStorage}. This token is used as the primary key for Supabase.
+
+When a user changes a visual setting---say, switching to the OpenDyslexic font or widening line spacing---the state update triggers a React re-render immediately, and a debounced background function pushes the new configuration to the \texttt{user\_preferences} table. The next time the user opens the app, their exact setup is waiting for them.
+
+\subsection{Document Ingestion and the PDF Parsing Pipeline}
+Many of the documents a dyslexic reader might want to work with---textbooks, reports, forms---come as PDFs. Parsing these in a browser is tricky because the work can block the main thread. Synapse offloads this to a dedicated Web Worker using the \texttt{pdfjs-dist} library~\cite{19}.
+
+When a PDF is uploaded, the file is handed off to a Vite-configured background worker (\texttt{pdfParser.ts}). The worker extracts the text layer page by page, skips over vector graphics and images, and passes the result back to the main thread. The tokenization engine then wraps each word and sentence in its appropriate span before injecting the content into state. If a PDF has only scanned images and no selectable text layer, the pipeline catches that gracefully and shows a fallback message.
+
+
+\FloatBarrier
+% ==========================
+% SECTION V: ASSISTIVE READER SYSTEM
+% ==========================
+\section{Assistive Reader System}
+\label{sec:reader}
+
+The Assistive Reader is the heart of Synapse. It acts as a perceptual overlay engine sitting on top of the tokenized reading surface, responding to user interaction in real time across visual, auditory, lexical, and attention-tracking dimensions.
+
+\subsection{Visual Assistance Layers and Typography}
+Instead of applying a fixed CSS class and calling it done, the editor computes a \texttt{React.CSSProperties} object dynamically from the user's current settings. This allows smooth, continuous control over every typographic parameter without re-tokenizing the text. The system includes the \textbf{OpenDyslexic} typeface~\cite{13}, whose weighted letter bases reduce the perceived rotation and inversion that trouble many dyslexic readers.
+
+Three visual overlays layer on top of the customizable typography:
+\begin{itemize}
+    \item \textbf{Reading Guide:} A soft horizontal band that follows the cursor's Y-position, acting as a digital ruler to stop the reader from losing their place between lines.
+    \item \textbf{Focus Mode:} Gradient overlays that dim the text above and below the active reading area, creating a soft spotlight effect that reduces peripheral distraction.
+    \item \textbf{Word Highlighting:} Extra inter-word spacing and contrast that keeps words from bleeding visually into one another---the so-called crowding effect that disproportionately affects dyslexic readers.
+\end{itemize}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{2x2.png}
+    \caption{\textbf{Implemented Assistive Interface.} (a) Sidebar control panel for granular typography adjustment. (b) Central reading pane with active karaoke-style highlighting using the OpenDyslexic typeface. (c) ``Yellow Mode'' display to reduce visual stress.}
+    \label{fig:reader_ui}
+\end{figure}
+
+\subsection{Word-Level Cognitive Scaffolding}
+One of the more significant additions in the current build is the word-help system. Hovering over or clicking any word opens a contextual panel that gives the reader five kinds of decoding support:
+\begin{itemize}
+    \item \textbf{Syllable Chunking:} A vowel-group regex (\texttt{/[\^{}aeiouy]*[aeiouy]+(?:[\^{}aeiouy](?=[aeiouy]))?/gi}) breaks the word into pronunciation chunks, with post-processing for silent trailing \textit{e} and stray consonants. ``Understanding,'' for example, becomes ``un~--~der~--~stan~--~ding.''
+    \item \textbf{Phonetic Simplification:} Common orthographic patterns are substituted with phonetically clearer equivalents---\texttt{tion}$\rightarrow$\texttt{shun}, \texttt{ph}$\rightarrow$\texttt{f}, \texttt{ough}$\rightarrow$\texttt{uff}---so the pronunciation hint looks the way the word sounds rather than the way it is spelled.
+    \item \textbf{Morphological Decomposition:} The word is checked against lists of known prefixes (\textit{un-}, \textit{re-}, \textit{dis-}, \textit{trans-}, and others) and suffixes (\textit{-tion}, \textit{-ment}, \textit{-ness}, \textit{-able}, and others). A minimum-root constraint of three characters prevents the system from making nonsense decompositions of short words.
+    \item \textbf{Simple Definitions:} A locally stored, handcrafted dictionary provides plain-language meanings for frequently encountered vocabulary. For words not in the dictionary, morphological fallback rules fill in a contextual clue---``The prefix `un-' usually means `not' or `the opposite of.'\,''
+    \item \textbf{Pronunciation Playback:} A speech synthesis button reads the word aloud at a speed the user controls (0.5x to 1.5x), with the chosen rate persisted across sessions via \texttt{localStorage}.
+\end{itemize}
+
+\subsubsection{Heuristic Word Difficulty Scoring}
+To surface potentially difficult words before a reader even hovers over them, Synapse scores every word in the document using a simple additive rubric:
+\begin{itemize}
+    \item Words with 8 or more characters: $+2$; with 6 or more: $+1$.
+    \item Words with 3 or more syllable chunks: $+2$; with exactly 2: $+1$.
+    \item Three or more consecutive consonants: $+1$.
+    \item Irregular orthographic clusters (e.g.\ \texttt{tion}, \texttt{ough}, \texttt{eigh}, \texttt{phth}): $+2$.
+    \item A recognized prefix or suffix: $+1$.
+\end{itemize}
+
+Words scoring 5 or higher are marked \textit{high difficulty} with a red-tinted underline; those scoring 3 or higher are marked \textit{moderate} with an amber tint. These markers appear when the ``Highlight Tricky Words'' toggle is on and never alter the document text itself.
+
+The panel interaction is dual-state: hovering a word shows a quick preview (with a 140\,ms delay on dismissal to keep it usable), while clicking pins the panel so the reader can interact with the buttons without the card disappearing.
+
+\subsection{Sentence-Level Clause Simplification}
+Long, clause-heavy sentences are a known pain point for working memory~\cite{14}. Synapse deals with them by changing how they look without changing what they say.
+
+Each sentence is parsed with a clause-splitting heuristic that looks for boundaries at commas, semicolons, colons, and common subordinating conjunctions (\textit{because}, \textit{which}, \textit{that}, \textit{while}, \textit{although}, \textit{but}, \textit{and}, \textit{or}, \textit{so}). A sentence is treated as complex when it has more than one clause \textit{and} exceeds 12 words. When ``Break Long Sentences'' is active, the reader sees:
+\begin{enumerate}
+    \item The sentence broken into clause segments with subtle dividers between them.
+    \item One clause at full opacity; the rest dimmed to 0.4.
+    \item Clicking the sentence steps focus forward to the next clause in sequence.
+\end{enumerate}
+
+The underlying text is never rewritten. The system only shifts where the visual weight falls, making it easier to parse one piece at a time while the full sentence stays visible.
+
+\subsection{Therapeutic Mechanisms and Cognitive Support}
+By moving from a standard text editor to a tokenized reading surface, the Assistive Reader can support three scientifically grounded cognitive mechanisms simultaneously:
+\begin{enumerate}
+    \item \textbf{Bi-Modal Reinforcement:} Many dyslexic readers find it hard to map sounds to letters consistently~\cite{3}. Highlighting the current word in sync with its audio output gives the brain a paired visual--auditory signal, which may strengthen the phoneme--grapheme connection over repeated exposure.
+    \item \textbf{Oculomotor Guidance:} Dyslexic readers make significantly more backward eye movements than typical readers~\cite{8}. A smoothly advancing highlight gives the eyes a forward anchor, which can reduce regression frequency and help maintain reading momentum.
+    \item \textbf{Working Memory Offloading:} When decoding a word demands a lot of effort, it leaves less capacity for understanding the sentence~\cite{14,15}. Shifting the decoding burden to the TTS engine and the word-help panel frees up working memory for comprehension.
+\end{enumerate}
+
+\subsection{Scroll Architecture and Stability}
+Long documents require a stable visual environment. The application body is scroll-locked, while the editor container manages its own internal scroll. This keeps the control panel, overlays, and reading guide in exact alignment throughout, and ensures that low-contrast background colors---the warm \#FFF9E6 default targets the visual stress reduction described in~\cite{6}---do not clip or shift as the reader scrolls. Contrast ratios are kept within standard WCAG bounds.
+
+\subsection{Dual-Mode Text-to-Speech}
+The TTS engine uses the native \texttt{SpeechSynthesisUtterance} API and operates in two modes. For full-document reading, content is split into sentences, and each sentence is read and highlighted in turn, with the active sentence auto-scrolled into view. This gives sentence-level visual--auditory synchronization without forcing the reader to track a word-by-word cursor. For targeted support, clicking any individual word triggers playback of that word alone at the user's preferred rate. The two modes complement each other---the first for reading flow, the second for stopping to work through a hard word.
+
+\subsection{Algorithmic Tokenization for DOM Mapping}
+Making word-level features work requires knowing where every word lives on the screen. In a plain \texttt{<textarea>}, this is computationally prohibitive. Synapse solves it by running a regex tokenizer over the ingested text that splits at word boundaries and whitespace, then wraps each token in a \texttt{<span data-word="true">}. The browser's \texttt{getBoundingClientRect()} API can then give the exact coordinates of any word at any time---the foundation for the Reading Guide, for positioning the word-help panel, and for the attention-tracking system's ability to map a head-derived Y-coordinate to the sentence currently under it.
+
+\subsection{Distraction-Free Reading Mode}
+A control panel full of options is useful when you are setting up---it is a nuisance when you are actually trying to read. Synapse's Reading Mode hides the full sidebar and expands the reading surface to fill the screen. A small floating action bar stays visible with just three buttons: the Support Hub, the Read Aloud toggle, and the exit button. Once a reader has their settings right, they can switch into Reading Mode and the interface gets out of the way.
+
+\FloatBarrier
+% ==========================
+% SECTION VI: HYBRID ATTENTION TRACKING
+% ==========================
+\section{Browser-Native Hybrid Attention Tracking}
+\label{sec:tracking}
+
+Getting reliable attention tracking to work in an ordinary browser, using an ordinary webcam, is genuinely hard. This section explains what we tried, why we changed direction, and how the final implementation works.
+
+\subsection{Design Rationale: From Word-Level Gaze to Sentence-Level Guidance}
+Our first prototype aimed at word-level gaze tracking, using CNN-based pipelines built around OpenFace~\cite{19_openface}, MTCNN~\cite{20}, and CLNF~\cite{21}. In controlled conditions these looked promising, but in practice we ran into a collection of problems that made the approach unworkable:
+\begin{itemize}
+    \item The \texttt{window.FaceDetector} API proved unreliable across browsers and machines.
+    \item Perspective-n-Point (PnP) head pose estimation was too computationally expensive for smooth real-time use.
+    \item Consumer webcams simply do not have the resolution to reliably distinguish which word within a line the reader is looking at.
+    \item When someone reads normally---sitting still, eyes moving across lines---the useful vertical variation in their head position is very small. It is not enough signal for word-level precision.
+\end{itemize}
+
+Facing these realities, we shifted the goal. Instead of trying to pinpoint where in a line the reader is looking, we track which sentence they are reading. For practical reading support, that resolution is both sufficient and more stable. The highlighted sentence becomes a gentle forward guide rather than a jittery cursor competing for attention.
+
+\subsection{MediaPipe FaceLandmarker Integration}
+The rebuilt tracking pipeline uses \texttt{@mediapipe/tasks-vision}~\cite{22}, loaded via dynamic import so it does not affect initial page load time. Starting up tracking follows this sequence:
+\begin{enumerate}
+    \item Request webcam access with \texttt{getUserMedia} (user-facing camera).
+    \item Mount the stream into a hidden \texttt{<video>} element.
+    \item Dynamically import the MediaPipe vision module.
+    \item Resolve WebAssembly assets via \texttt{FilesetResolver.forVisionTasks}.
+    \item Create a \texttt{FaceLandmarker} using the GPU delegate; fall back to CPU automatically if the device does not support GPU acceleration.
+    \item Start a \texttt{requestAnimationFrame} loop with a 220\,ms sampling interval.
+\end{enumerate}
+
+The model detects 478 facial landmarks and 10 iris landmarks per frame. Detection, presence, and tracking confidence thresholds are all set to 0.5.
+
+\subsection{Hybrid Signal Computation}
+We combine two signals to estimate where in the document the reader's attention is focused.
+
+\textbf{Stage 1: Head Pose (Primary Signal).} The vertical face center $f_y$ is derived from the bounding extent of all detected facial landmarks. After calibration, the estimated reading coordinate is:
+\begin{equation}
+    y_{\text{head}} = \text{clamp}(0.34 + (f_y - b_y) \times 1.35,\; 0.12,\; 0.9)
+\end{equation}
+Here $b_y$ is the learned baseline from calibration. The 0.34 neutral target reflects where readers actually tend to focus---slightly above the vertical midpoint. The gain of 1.35 amplifies small head movements so that minor shifts map to meaningful changes in the active sentence.
+
+\textbf{Stage 2: Iris Offset (Secondary Adjustment).} For each eye, we normalize the iris center's vertical position within the eye opening:
+\begin{equation}
+    \delta_{\text{iris}} = \frac{y_{\text{iris}} - y_{\text{top}}}{y_{\text{bottom}} - y_{\text{top}}} - 0.5
+\end{equation}
+We use MediaPipe landmark indices 159 (top), 145 (bottom), and 468 (iris center) for the left eye, and 386, 374, 473 for the right. The average iris offset from both eyes is then blended in:
+\begin{equation}
+    y_{\text{final}} = \text{clamp}(y_{\text{head}} + \bar{\delta}_{\text{iris}} \times 0.16,\; 0.12,\; 0.9)
+\end{equation}
+
+The iris gain (0.16) is deliberately small. The iris signal adds responsiveness but is noisier than the head signal, so it plays a supporting role rather than a leading one.
+
+\subsection{Adaptive Calibration Protocol}
+A fixed neutral baseline cannot account for the fact that every user sits differently---different chair heights, camera angles, screen positions, and postures all shift where the face appears in frame. We handle this with a short calibration step:
+\begin{enumerate}
+    \item When tracking is enabled, the system loads the model and enters a \textit{calibrating} state.
+    \item A centered on-screen card asks the user to settle into their normal reading posture for about 2.8 seconds.
+    \item While the user holds still, we collect face-center Y samples at the standard sampling rate.
+    \item If at least 6 samples come in, their mean becomes the personal baseline $b_y$.
+    \item The system switches to \textit{active} and the calibration card disappears automatically.
+\end{enumerate}
+
+If too few samples arrive---say because the user moved out of frame---the calibration window restarts. The whole process takes under three seconds and runs once per tracking session.
+
+\subsection{Sentence Selection and Stability}
+Once $y_{\text{final}}$ is computed, we select the active sentence as follows:
+\begin{enumerate}
+    \item Query all \texttt{[data-sentence-index]} spans in the editor DOM.
+    \item Keep only those whose bounding rectangles are within the current scroll viewport.
+    \item Compute each visible sentence's vertical center.
+    \item Select the sentence closest to $y_{\text{target}} = \text{scrollRect.top} + y_{\text{final}} \times \text{scrollRect.height}$.
+\end{enumerate}
+
+To prevent the highlight from flickering between adjacent sentences, a hysteresis filter requires a candidate sentence to be selected in two consecutive samples before the active highlight actually switches. In practice this makes the tracking feel considerably steadier than a naive nearest-neighbor selection would.
+
+\subsection{Privacy Architecture}
+The tracking feature is opt-in and browser-local by design:
+\begin{itemize}
+    \item The camera activates only when the user explicitly toggles tracking on.
+    \item All video frames are processed within the browser session and never sent to any server.
+    \item When tracking is turned off, media tracks are stopped and all MediaPipe resources are released.
+    \item The status display in the UI clearly communicates that video stays on the device.
+\end{itemize}
+
+\FloatBarrier
+% ==========================
+% SECTION VII: CURATED SUPPORT HUB
+% ==========================
+\section{Curated Support Hub}
+\label{sec:support_hub}
+
+Dyslexia does not just affect reading in school or work---it affects how people feel about themselves, how families navigate assessments, and how communities get access to help. Synapse includes a curated Support Hub specifically because technology alone is not enough.
+
+\subsection{Design Rationale}
+When someone is looking for support, a list of unverified search results is not good enough. Unreviewed results can surface commercial content, outdated advice, or simply unreliable sources at a moment when the user may be anxious or overwhelmed. The Support Hub instead draws from a developer-maintained typed dataset of 21 carefully chosen resources. Each entry carries a \texttt{trustedWhy} field that explains in plain language why the source was selected---transparency the user can actually act on.
+
+\subsection{Resource Organization}
+Resources sit in four sections:
+\begin{itemize}
+    \item \textbf{Trusted Guides:} Plain-language explainers from the International Dyslexia Association, Yale Center for Dyslexia \& Creativity, Understood, NHS, the Dyslexia Association of India, Madras Dyslexia Association, and others.
+    \item \textbf{Videos:} Official video libraries and channels with dyslexia-specific content.
+    \item \textbf{Helplines:} Direct support contacts including India's Tele-MANAS (14416) and the U.S. 988 crisis line.
+    \item \textbf{Find Local Help:} Directories for clinics, local organizations, and regional referral support---including NIMHANS in India.
+\end{itemize}
+
+The hub offers nine filter categories (All, India, Global, Adults, Parents, Teachers, Students, Videos, Helplines) and free-text search. The India-specific resources are a deliberate choice; most globally oriented assistive platforms do not include them.
+
+\FloatBarrier
+% ==========================
+% SECTION VIII: EXPERIMENTAL RESULTS
+% ==========================
+\section{Experimental Results: Cognitive Difficulty Prediction}
+\label{sec:experiments}
+
+Knowing which words and passages are likely to be cognitively difficult is the precondition for a truly adaptive system. This section describes how we built and evaluated a machine learning pipeline for that prediction task.
+
+\subsection{Dataset and Target Variable Formulation}
+We used the Zurich Cognitive Language Processing Corpus (ZuCo)~\cite{16}, merging L1 and L2 reading task data into a single training pool. The raw dataset contains eye-tracking measurements per word, but no ready-made difficulty label.
+
+To create one, we first z-score-normalized all gaze metrics within each participant to cancel out individual reading speed differences. We then aggregated the normalized metrics into a composite stress score per word using median values across subjects. Words falling at or above the 75th percentile of this stress score were labeled cognitively difficult (Class 1); the rest were labeled baseline (Class 0). This percentile threshold captures the genuinely hard tail of the distribution while keeping class balance reasonable.
+
+\subsection{Psycholinguistic Feature Engineering}
+Each word was described by two feature groups:
+\begin{itemize}
+    \item \textbf{Lexical Features:} Character length (\texttt{char\_len}), syllable count from vowel-group regex (\texttt{[aeiouy]+}), and vowel ratio (\texttt{vowel\_ratio}).
+    \item \textbf{Gaze/Behavioral Features:} Total reading time, go-past time, first fixation duration, and gaze duration. Missing values---caused by tracking loss during data collection---were imputed with per-feature medians.
+\end{itemize}
+
+\subsection{Algorithmic Selection and Hardware Environment}
+We chose tree-based ensemble methods because they handle non-linear feature interactions naturally and integrate cleanly with SHAP explainability~\cite{18}. All experiments ran on a Kaggle Nvidia P100 GPU instance.
+
+The three models and their configurations:
+\begin{itemize}
+    \item \textbf{Random Forest:} 500 trees, balanced class weights, all CPU cores (\texttt{n\_jobs=-1}).
+    \item \textbf{Gradient Boosting:} 300 estimators, learning rate 0.05.
+    \item \textbf{XGBoost~\cite{17}:} 800 estimators, max depth 6, learning rate 0.03, histogram-based tree method (\texttt{tree\_method="hist"}) on the GPU. Both subsampling parameters set to 0.8 to guard against overfitting.
+\end{itemize}
+
+\subsection{Cross-Validation Strategy and Ablation Study}
+Data leakage is a real risk when the same participant appears in training and test splits. We prevented it with \texttt{GroupKFold} cross-validation ($K=5$) grouped on subject ID (\texttt{pp\_nr}).
+
+We ran an ablation across three feature configurations---Lexical-only, Gaze-only, and Combined---to understand how much each group contributes. Results are in Table~\ref{tab:ablation_results}.
+
+\begin{table}[htbp]
+\caption{Ablation Study Results (5-Fold Grouped CV Means)}
+\centering
+\begin{tabular}{|l|l|c|c|}
+\hline
+\textbf{Feature Set} & \textbf{Model} & \textbf{Mean AUC} & \textbf{Mean F1} \\
+\hline
+\multirow{3}{*}{Lexical Only}
+ & Random Forest & 0.6430 & 0.4254 \\
+ & Gradient Boosting & 0.6432 & 0.0751 \\
+ & XGBoost & 0.6432 & 0.0724 \\
+\hline
+\multirow{3}{*}{Gaze Only}
+ & Random Forest & 0.9979 & 0.9795 \\
+ & Gradient Boosting & 0.9983 & 0.9775 \\
+ & XGBoost & 0.9988 & 0.9805 \\
+\hline
+\multirow{3}{*}{Combined}
+ & Random Forest & 0.9985 & 0.9798 \\
+ & Gradient Boosting & 0.9983 & 0.9774 \\
+ & \textbf{XGBoost} & \textbf{0.9989} & \textbf{0.9804} \\
+\hline
+\end{tabular}
+\label{tab:ablation_results}
+\end{table}
+
+\subsection{Interpretation of Predictive Performance}
+The gap between feature sets is striking. Lexical features alone plateau around AUC 0.643---barely better than chance. Gaze features alone push that to 0.998. Combining both with XGBoost reaches 0.9989 AUC and 0.9804 F1, the best result overall.
+
+The takeaway is clear: cognitive reading difficulty is primarily a behavioral phenomenon. How long a reader's eyes dwell on a word is a far stronger signal than how many letters or syllables it contains. This is exactly why we built the attention-tracking system described in Section~\ref{sec:tracking}---the experimental evidence says behavioral observation is where the useful signal lives.
+
+It is worth noting that Synapse's heuristic word difficulty scorer, described in Section~\ref{sec:reader}, works entirely on lexical features. That scorer is not trying to compete with the ML model. Its role is different: it provides an immediate, zero-latency visual cue based on what can be computed from the text alone, before any behavioral data has been collected. The two approaches complement each other.
+
+\subsection{Feature Importance and Explainability}
+To make the model's decisions readable for educational and clinical audiences, we applied SHAP~\cite{18} to the XGBoost Combined model.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{shap_summary.png}
+    \caption{SHAP summary plot for the XGBoost Combined model. Gaze features dominate; lexical features contribute only at the margins.}
+    \label{fig:shap_analysis}
+\end{figure}
+
+As Fig.~\ref{fig:shap_analysis} shows, \texttt{word\_total\_reading\_time} and \texttt{word\_go\_past\_time} are the two most influential features by a wide margin. Long dwell times and high go-past times consistently push the model toward predicting difficulty. Lexical features like \texttt{char\_len} and \texttt{vowel\_ratio} cluster near zero impact, though they still contribute meaningfully in cases where behavioral signals are temporarily noisy or missing.
+
+\FloatBarrier
+% ==========================
+% SECTION IX: DISCUSSION, LIMITATIONS, AND FUTURE WORK
+% ==========================
+\section{Discussion, Limitations, and Future Work}
+\label{sec:discussion}
+
+Building toward a truly adaptive reading system reveals as many open questions as it answers. This section addresses the broader implications of the work and is frank about what we have not solved yet.
+
+\subsection{Bridging the Hardware Gap}
+The ML results from Section~\ref{sec:experiments} make a strong case for behavioral signals. The tracking system in Section~\ref{sec:tracking} is our attempt to get those signals into everyday hardware. Sentence-level resolution is not as precise as clinical infrared tracking, but it is stable and useful---and it runs on any laptop with a webcam. What we have not yet measured is exactly how much predictive power degrades when you replace a research-grade tracker with a consumer camera. Quantifying that gap is important future work, because it determines how confidently the system can trigger adaptive UI changes.
+
+\subsection{Privacy and Data Governance}
+Capturing any kind of behavioral or biometric data requires careful handling. Synapse processes everything locally---webcam frames stay in the browser, and behavioral signals never reach a server. When the tracking feature is turned off, media tracks are explicitly stopped and memory is freed. Future cloud-based processing, if any, will use only anonymized feature vectors, in line with educational data protection requirements.
+
+\subsection{Generalization Across Languages}
+Dyslexia looks different in different writing systems. Languages with consistent spelling rules (shallow orthographies) tend to produce speed problems; languages with inconsistent rules (deep orthographies like English) tend to produce accuracy problems. Synapse's architecture is modular, so the reading features and behavioral models can be retuned for other orthographic contexts without rebuilding the core engine. The NLP utilities---syllable chunking, phonetic simplification, morphological analysis---are currently English-focused, but their regex-based structure makes adaptation to other Latin-script languages relatively straightforward.
+
+\subsection{Limitations}
+We want to be upfront about what is still missing:
+\begin{itemize}
+    \item \textbf{Tracking Resolution:} Sentence-level guidance is useful but not as fine-grained as word-level. The accuracy gap between clinical and browser-native tracking has not been formally measured.
+    \item \textbf{Heuristic Accuracy:} The syllable chunker, phonetic hints, and difficulty scorer are handcrafted rules, not linguistically validated models. We have not evaluated them against reference benchmarks like the CMU Pronouncing Dictionary.
+    \item \textbf{No User Study:} None of the assistive features have been tested in a controlled study with actual dyslexic readers. Reading speed, comprehension, and subjective experience metrics are outstanding.
+    \item \textbf{Database Security:} Current Supabase row-level security is fully open---fine for development, but needs tightening before broad deployment.
+    \item \textbf{Bundle Size:} Including pdf.js, MediaPipe, and the main app in one bundle produces large download sizes. Code splitting is on the list.
+\end{itemize}
+
+\subsection{Future Research Roadmap}
+We see the next steps falling into four phases:
+\begin{enumerate}
+    \item \textbf{Formal User Study:} A controlled evaluation with dyslexic participants (target N$\geq$20) measuring reading speed (WPM), comprehension accuracy, regression frequency, and subjective comfort---compared against unassisted reading and against existing tools like Microsoft Immersive Reader.
+    \item \textbf{DOM-Based Behavioral Signals:} Before we can close the loop from behavioral data to UI adaptation, we need richer behavioral proxies that work without a webcam: caret dwell time, scroll pause duration, TTS replay frequency, and word-help panel activation patterns all have potential.
+    \item \textbf{Adaptive UI Triggers:} Connect the ML difficulty predictions and attention-tracking signals to the visual layer. Instead of static settings, the system would dynamically adjust font weight, word spacing, or TTS pacing for passages it predicts will be hard.
+    \item \textbf{Longitudinal A/B Study:} Validate that the adaptive features produce lasting reading improvements, not just a short-lived novelty effect---tracking WPM, accuracy, and comprehension over weeks rather than minutes.
+\end{enumerate}
+
+% ==========================
+% SECTION X: CONCLUSION
+% ==========================
+\section{Conclusion}
+
+Too often, people with dyslexia face a fragmented landscape of tools---a TTS app here, a font plugin there, a clinical eye-tracker that requires specialist hardware. Each helps with something specific and nothing else. The cost falls on the user, who has to stitch these pieces together while managing the cognitive load they were supposed to reduce.
+
+Synapse was built to address this directly. By shifting the underlying reading surface from a plain text input to a tokenized, dual-level DOM structure, we established a foundation where visual customization, word-level scaffolding, sentence simplification, TTS synchronization, and webcam-based attention tracking can all operate on the same data at the same time. The system delivers six layers of reading support---typographic customization, syllable chunking, phonetic hints, morphological decomposition, difficulty scoring and definitions, sentence-level clause focus, sentence-synchronized audio, browser-native head and iris tracking with adaptive calibration, and a curated trust-oriented resource hub---without ever modifying the source text.
+
+The ZuCo evaluation confirmed that behavioral signals dominate lexical ones for predicting cognitive difficulty (AUC 0.9989 with XGBoost). That finding strengthens the case for the attention-tracking system, which brings behavioral observation from laboratory-grade hardware to an ordinary consumer webcam.
+
+Synapse does not just render text. It watches how that text is read. The goal, going forward, is to close the loop: observe behavioral signals, predict difficulty in real time, and adapt the interface accordingly---so that the system supports the reader rather than asking the reader to configure the system.
+
+\section*{Data and Code Availability}
+The ZuCo corpus used for machine learning evaluation is publicly available. The Synapse frontend, tokenization engine, word-level scaffolding utilities, MediaPipe tracking pipeline, and XGBoost modeling code will be released in a public repository upon publication to support reproducibility and further research in accessible computing.
+
+% ==========================
+% REFERENCES
+% ==========================
+\begin{thebibliography}{00}
+
+\bibitem{1}
+D. L. Lefly and B. F. Pennington,
+``Reliability and validity of the Adult Reading History Questionnaire,''
+\textit{Journal of Learning Disabilities}, vol. 33, no. 3, pp. 286--296, 2000.
+
+\bibitem{2}
+A. J. Fawcett and R. I. Nicolson,
+\textit{Dyslexia Screening Test (DST)},
+London, U.K.: Harcourt Assessment, 1996.
+
+\bibitem{3}
+M. J. Snowling,
+\textit{Dyslexia},
+Oxford, U.K.: Blackwell Publishing, 2000.
+
+\bibitem{7}
+E. L. F. da Silva, R. S. Guti\'errez, and A. P. C. da Silva,
+``Using acoustic features to identify speech difficulties associated with dyslexia,''
+\textit{International Journal of Speech Technology}, vol. 22, pp. 601--612, 2019.
+
+\bibitem{10}
+E. L. F. da Silva \textit{et al.},
+``Automatic detection of reading difficulties using speech alignment patterns,''
+in \textit{Proc. IEEE Int. Conf. Acoustics, Speech and Signal Processing (ICASSP)},
+2021, pp. 7428--7432.
+
+\bibitem{12}
+S. Cox and S. Dasmahapatra,
+``High-level approaches to confidence estimation in speech recognition,''
+\textit{IEEE Transactions on Speech and Audio Processing}, vol. 10, no. 7, pp. 460--471, 2002.
+
+\bibitem{14}
+A.~D. Baddeley and G.~Hitch,
+``Working Memory,''
+\textit{Psychology of Learning and Motivation},
+vol.~8, pp.~47--89, 1974.
+
+\bibitem{15}
+J.~Sweller,
+``Cognitive load during problem solving: Effects on learning,''
+\textit{Cognitive Science},
+vol.~12, no.~2, pp.~257--285, 1988.
+
+\bibitem{6}
+H. Irlen,
+\textit{Reading by the Colors: Overcoming Dyslexia and Other Reading Disabilities Through the Irlen Method},
+New York, NY, USA: Avery Publishing, 2005.
+
+\bibitem{5}
+S. N. Abdul Wahid,
+``Evaluation of dyslexia-friendly fonts for improved readability,''
+\textit{International Journal of Education and Literacy}, 2017.
+
+\bibitem{13}
+A. Gonzalez,
+``OpenDyslexic: A typeface for dyslexia,''
+OpenDyslexic, 2011. [Online]. Available: \url{https://opendyslexic.org}
+
+\bibitem{4}
+J. Stein,
+``The magnocellular theory of developmental dyslexia,''
+\textit{Dyslexia}, vol. 7, no. 1, pp. 12--36, 2001.
+
+\bibitem{8}
+M. N. Benfatto \textit{et al.},
+``Screening for dyslexia using eye tracking during reading,''
+\textit{Journal of Learning Disabilities}, vol. 49, no. 2, pp. 196--208, 2016.
+
+\bibitem{9}
+A. Khalid, M. Zaffar, and M. Ramzan,
+``Assistive technologies for dyslexia: A review,''
+\textit{IEEE Access}, vol. 8, pp. 64589--64609, 2020.
+
+\bibitem{19}
+Mozilla Foundation,
+``PDF.js: A General-Purpose, Web Standards-Based Platform for Parsing and Rendering PDFs,''
+2024. [Online]. Available: \url{https://mozilla.github.io/pdf.js/}
+
+\bibitem{16}
+N. Hollenstein et al.,
+``ZuCo, a simultaneous EEG and eye-tracking resource for sentence reading,''
+\textit{Scientific Data}, vol. 5, no. 1, pp. 1--13, 2018.
+
+\bibitem{18}
+S. M. Lundberg and S.-I. Lee,
+``A Unified Approach to Interpreting Model Predictions,''
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol. 30, 2017.
+
+\bibitem{17}
+T. Chen and C. Guestrin,
+``XGBoost: A Scalable Tree Boosting System,''
+in \textit{Proc. 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining}, 2016, pp. 785--794.
+
+\bibitem{19_openface}
+T. Baltru\v{s}aitis, P. Robinson, and L.-P. Morency,
+``OpenFace: an open source facial behavior analysis toolkit,''
+in \textit{IEEE Winter Conference on Applications of Computer Vision (WACV)}, 2016, pp. 1--10.
+
+\bibitem{20}
+K. Zhang, Z. Zhang, Z. Li, and Y. Qiao,
+``Joint face detection and alignment using multitask cascaded convolutional networks,''
+\textit{IEEE Signal Processing Letters}, vol. 23, no. 10, pp. 1499--1503, 2016.
+
+\bibitem{21}
+T. Baltru\v{s}aitis, P. Robinson, and L.-P. Morency,
+``Constrained Local Neural Fields for robust facial landmark detection in the wild,''
+in \textit{IEEE International Conference on Computer Vision Workshops (ICCVW)}, 2013, pp. 354--361.
+
+\bibitem{22}
+L. Kartynnik, A. Ablavatski, I. Grishchenko, and M. Grundmann,
+``Real-time facial surface geometry from monocular video on mobile GPUs,''
+in \textit{Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)}, 2019, pp. 2--7.
+
+\bibitem{23}
+J. F. Carlisle,
+``Morphological awareness and early reading achievement,''
+in \textit{Morphological Aspects of Language Processing}, L. B. Feldman, Ed.
+Hillsdale, NJ, USA: Lawrence Erlbaum Associates, 1995, pp. 189--209.
+
+\end{thebibliography}
+
+
+
+\end{document}

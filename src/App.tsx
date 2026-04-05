@@ -1,12 +1,9 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { ArrowLeft, LifeBuoy, Menu, PanelLeftClose, Volume2 } from 'lucide-react';
 import { ControlPanel } from './components/ControlPanel';
 import { TextEditor } from './components/TextEditor/TextEditor';
-import { DocumentModal } from './components/DocumentModal';
-import { SupportHub } from './components/SupportHub';
 import { ReaderSettings, Document } from './types';
 import { supabase } from './lib/supabase';
-import { extractTextFromPdf } from './utils/pdfParser';
 import { splitIntoSentences } from './utils/sentences';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
@@ -18,6 +15,16 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   backgroundColor: '#FFF9E6',
   textColor: '#000000',
 };
+
+const DocumentModal = lazy(() =>
+  import('./components/DocumentModal').then((module) => ({ default: module.DocumentModal }))
+);
+const SupportHub = lazy(() =>
+  import('./components/SupportHub').then((module) => ({ default: module.SupportHub }))
+);
+
+const LOCAL_SETTINGS_KEY = 'reader_settings';
+const LOCAL_DOCUMENTS_KEY = 'reader_documents';
 
 function App() {
   const [content, setContent] = useState('');
@@ -40,10 +47,30 @@ function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [activeSentenceIndex, setActiveSentenceIndex] = useState<number | null>(null);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadSettings();
+    const syncAuthUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setAuthUserId(user?.id ?? null);
+    };
+
+    syncAuthUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUserId(session?.user?.id ?? null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [authUserId]);
 
   useEffect(() => {
     localStorage.setItem('hover_pronunciation_rate', hoverPronunciationRate.toString());
@@ -64,12 +91,28 @@ function App() {
   }, [readingMode]);
 
   const loadSettings = async () => {
-    const sessionId = getSessionId();
-    const { data } = await supabase
+    if (!authUserId) {
+      const localSettings = readLocalSettings();
+      if (localSettings) {
+        setSettings(localSettings);
+      }
+      return;
+    }
+
+    const { data, error } = await supabase
       .from('user_preferences')
       .select('*')
-      .eq('session_id', sessionId)
+      .eq('user_id', authUserId)
       .maybeSingle();
+
+    if (error) {
+      console.error('Could not load cloud settings:', error.message);
+      const localSettings = readLocalSettings();
+      if (localSettings) {
+        setSettings(localSettings);
+      }
+      return;
+    }
 
     if (data) {
       setSettings({
@@ -81,20 +124,35 @@ function App() {
         backgroundColor: data.background_color,
         textColor: data.text_color,
       });
+      return;
+    }
+
+    const localSettings = readLocalSettings();
+    if (localSettings) {
+      setSettings(localSettings);
     }
   };
 
   const saveSettings = async (newSettings: ReaderSettings) => {
-    const sessionId = getSessionId();
+    writeLocalSettings(newSettings);
 
-    const { data: existing } = await supabase
+    if (!authUserId) {
+      return;
+    }
+
+    const { data: existing, error: existingError } = await supabase
       .from('user_preferences')
       .select('id')
-      .eq('session_id', sessionId)
+      .eq('user_id', authUserId)
       .maybeSingle();
 
+    if (existingError) {
+      console.error('Could not check existing cloud settings:', existingError.message);
+      return;
+    }
+
     const settingsData = {
-      session_id: sessionId,
+      user_id: authUserId,
       font_family: newSettings.fontFamily,
       font_size: newSettings.fontSize,
       line_spacing: newSettings.lineSpacing,
@@ -106,14 +164,22 @@ function App() {
     };
 
     if (existing) {
-      await supabase
+      const { error } = await supabase
         .from('user_preferences')
         .update(settingsData)
         .eq('id', existing.id);
+
+      if (error) {
+        console.error('Could not update cloud settings:', error.message);
+      }
     } else {
-      await supabase
+      const { error } = await supabase
         .from('user_preferences')
         .insert(settingsData);
+
+      if (error) {
+        console.error('Could not save cloud settings:', error.message);
+      }
     }
   };
 
@@ -124,6 +190,7 @@ function App() {
 
   const handlePdfUpload = async (file: File) => {
     try {
+      const { extractTextFromPdf } = await import('./utils/pdfParser');
       const text = await extractTextFromPdf(file);
       setContent(text);
       setCurrentDocId(null);
@@ -140,6 +207,18 @@ function App() {
 
     const title = prompt('Enter document title:', 'Untitled Document');
     if (!title) return;
+
+    if (!authUserId) {
+      const savedDocument = upsertLocalDocument({
+        id: currentDocId ?? undefined,
+        title,
+        content,
+      });
+      setCurrentDocId(savedDocument.id);
+      setDocuments((current) => [savedDocument, ...current.filter((doc) => doc.id !== savedDocument.id)]);
+      alert('Document saved on this device.');
+      return;
+    }
 
     if (currentDocId) {
       const { error } = await supabase
@@ -159,6 +238,7 @@ function App() {
       const { data, error } = await supabase
         .from('documents')
         .insert({
+          user_id: authUserId,
           title,
           content,
         })
@@ -180,9 +260,16 @@ function App() {
   };
 
   const handleLoadDocuments = async () => {
+    if (!authUserId) {
+      setDocuments(readLocalDocuments());
+      setShowDocumentModal(true);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('documents')
       .select('*')
+      .eq('user_id', authUserId)
       .order('updated_at', { ascending: false });
 
     if (error) {
@@ -202,10 +289,14 @@ function App() {
   const handleDeleteDocument = async (id: string) => {
     if (!confirm('Are you sure you want to delete this document?')) return;
 
-    const { error } = await supabase.from('documents').delete().eq('id', id);
-    if (error) {
-      alert(`Could not delete the document: ${error.message}`);
-      return;
+    if (!authUserId) {
+      deleteLocalDocument(id);
+    } else {
+      const { error } = await supabase.from('documents').delete().eq('id', id);
+      if (error) {
+        alert(`Could not delete the document: ${error.message}`);
+        return;
+      }
     }
 
     setDocuments(documents.filter(doc => doc.id !== id));
@@ -429,28 +520,86 @@ function App() {
           </div>
         </div>
       )}
-      {showDocumentModal && (
-        <DocumentModal
-          documents={documents}
-          onClose={() => setShowDocumentModal(false)}
-          onLoad={handleLoadDocument}
-          onDelete={handleDeleteDocument}
-        />
-      )}
-      {showSupportHub && (
-        <SupportHub onClose={() => setShowSupportHub(false)} />
-      )}
+      <Suspense fallback={null}>
+        {showDocumentModal && (
+          <DocumentModal
+            documents={documents}
+            onClose={() => setShowDocumentModal(false)}
+            onLoad={handleLoadDocument}
+            onDelete={handleDeleteDocument}
+          />
+        )}
+        {showSupportHub && (
+          <SupportHub onClose={() => setShowSupportHub(false)} />
+        )}
+      </Suspense>
     </div>
   );
 }
 
-function getSessionId(): string {
-  let sessionId = localStorage.getItem('session_id');
-  if (!sessionId) {
-    sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    localStorage.setItem('session_id', sessionId);
+function readLocalSettings(): ReaderSettings | null {
+  const rawSettings = localStorage.getItem(LOCAL_SETTINGS_KEY);
+  if (!rawSettings) {
+    return null;
   }
-  return sessionId;
+
+  try {
+    return JSON.parse(rawSettings) as ReaderSettings;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalSettings(settings: ReaderSettings) {
+  localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function readLocalDocuments(): Document[] {
+  const rawDocuments = localStorage.getItem(LOCAL_DOCUMENTS_KEY);
+  if (!rawDocuments) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawDocuments) as Document[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalDocuments(documents: Document[]) {
+  localStorage.setItem(LOCAL_DOCUMENTS_KEY, JSON.stringify(documents));
+}
+
+function upsertLocalDocument(input: { id?: string; title: string; content: string }): Document {
+  const now = new Date().toISOString();
+  const documents = readLocalDocuments();
+  const existingDocument = input.id ? documents.find((doc) => doc.id === input.id) : null;
+
+  const nextDocument: Document = existingDocument
+    ? {
+        ...existingDocument,
+        title: input.title,
+        content: input.content,
+        updated_at: now,
+      }
+    : {
+        id: crypto.randomUUID(),
+        title: input.title,
+        content: input.content,
+        created_at: now,
+        updated_at: now,
+      };
+
+  const nextDocuments = [nextDocument, ...documents.filter((doc) => doc.id !== nextDocument.id)];
+  writeLocalDocuments(nextDocuments);
+  return nextDocument;
+}
+
+function deleteLocalDocument(id: string) {
+  const documents = readLocalDocuments().filter((doc) => doc.id !== id);
+  writeLocalDocuments(documents);
 }
 
 export default App;

@@ -7,4 +7,23 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('pdfjs-dist')) {
+            return 'pdfjs';
+          }
+
+          if (id.includes('@mediapipe/tasks-vision')) {
+            return 'mediapipe';
+          }
+
+          if (id.includes('@supabase/supabase-js')) {
+            return 'supabase';
+          }
+        },
+      },
+    },
+  },
 });
