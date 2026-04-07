@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Synapse Attention Tracking Evaluation</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="panel">
+        <div class="card">
+          <p class="eyebrow">Evaluation Harness</p>
+          <h1>Attention Tracking Benchmark</h1>
+          <p class="muted">
+            Standalone browser-based tool for measuring line-selection accuracy,
+            calibration success, detection availability, and jitter of the
+            current head + iris guidance pipeline.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>Session Setup</h2>
+          <label>
+            Participant ID
+            <input id="participantId" type="text" placeholder="P-001" />
+          </label>
+          <label>
+            Passage
+            <textarea id="passageInput" rows="9"></textarea>
+          </label>
+          <button id="loadPassageButton" class="primary">Load Passage</button>
+        </div>
+
+        <div class="card">
+          <h2>Tracking Settings</h2>
+          <label>
+            Head Sensitivity
+            <input id="headSensitivity" type="range" min="0.8" max="3" step="0.05" value="1.65" />
+            <span id="headSensitivityValue" class="value">1.65</span>
+          </label>
+          <label>
+            Eye Sensitivity
+            <input id="eyeSensitivity" type="range" min="0.04" max="0.75" step="0.01" value="0.16" />
+            <span id="eyeSensitivityValue" class="value">0.16</span>
+          </label>
+          <label>
+            Tracking Steadiness
+            <input id="trackingSteadiness" type="range" min="1" max="5" step="1" value="2" />
+            <span id="trackingSteadinessValue" class="value">2 hits</span>
+          </label>
+          <label>
+            Neutral Line Height
+            <input id="neutralHeight" type="range" min="0.2" max="0.5" step="0.01" value="0.30" />
+            <span id="neutralHeightValue" class="value">30%</span>
+          </label>
+        </div>
+
+        <div class="card">
+          <h2>Procedure</h2>
+          <ol class="compact-list">
+            <li>Load a passage and start the camera.</li>
+            <li>Run calibration and let the participant settle.</li>
+            <li>Ask the participant to read the highlighted target sentence.</li>
+            <li>Capture a trial after the highlight stabilizes.</li>
+            <li>Repeat across multiple sentence positions.</li>
+          </ol>
+          <div class="controls">
+            <button id="startCameraButton" class="primary">Start Camera</button>
+            <button id="calibrateButton">Calibrate</button>
+            <button id="stopCameraButton">Stop Camera</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Trial Controls</h2>
+          <div class="controls">
+            <button id="previousTargetButton">Previous Target</button>
+            <button id="nextTargetButton">Next Target</button>
+            <button id="captureTrialButton" class="primary">Capture Trial</button>
+          </div>
+          <div class="controls">
+            <button id="exportJsonButton">Export JSON</button>
+            <button id="exportCsvButton">Export CSV</button>
+            <button id="resetSessionButton">Reset Session</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Session Metrics</h2>
+          <dl class="metrics">
+            <div><dt>Status</dt><dd id="statusValue">Idle</dd></div>
+            <div><dt>Current Target</dt><dd id="targetValue">Sentence 1</dd></div>
+            <div><dt>Predicted Sentence</dt><dd id="predictionValue">None</dd></div>
+            <div><dt>Calibration Attempts</dt><dd id="calibrationAttemptsValue">0</dd></div>
+            <div><dt>Face Detection Rate</dt><dd id="detectionRateValue">0%</dd></div>
+            <div><dt>Exact Accuracy</dt><dd id="exactAccuracyValue">0%</dd></div>
+            <div><dt>Adjacent Accuracy</dt><dd id="adjacentAccuracyValue">0%</dd></div>
+            <div><dt>Mean Offset</dt><dd id="meanOffsetValue">0.00</dd></div>
+            <div><dt>Jitter (switches / 10s)</dt><dd id="jitterValue">0.00</dd></div>
+          </dl>
+        </div>
+
+        <div class="card">
+          <h2>Camera Preview</h2>
+          <video id="previewVideo" autoplay muted playsinline></video>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="status-banner">
+          <div>
+            <p class="eyebrow">Live Evaluation</p>
+            <h2>Sentence Selection View</h2>
+            <p class="muted">
+              Green border = instructed target sentence. Purple highlight = model prediction.
+            </p>
+          </div>
+          <div id="calibrationBanner" class="calibration-banner hidden">
+            Hold normal reading posture for calibration...
+          </div>
+        </section>
+
+        <section id="readingSurface" class="reading-surface" aria-live="polite"></section>
+
+        <section class="card trial-log">
+          <h2>Captured Trials</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Target</th>
+                <th>Predicted</th>
+                <th>Offset</th>
+                <th>Exact</th>
+                <th>Adjacent</th>
+              </tr>
+            </thead>
+            <tbody id="trialTableBody"></tbody>
+          </table>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

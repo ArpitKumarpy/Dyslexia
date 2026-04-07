@@ -46,6 +46,11 @@ type WordTarget = {
   rect: DOMRect;
 };
 
+type AttentionPoint = {
+  x: number;
+  y: number;
+};
+
 const HEAD_TRACKING_SAMPLE_MS = 220;
 const HEAD_TRACKING_CALIBRATION_MS = 2800;
 const HEAD_TRACKING_MIN_CALIBRATION_SAMPLES = 6;
@@ -55,11 +60,15 @@ const LEFT_EYE_INDICES = {
   top: 159,
   bottom: 145,
   irisCenter: 468,
+  outer: 33,
+  inner: 133,
 };
 const RIGHT_EYE_INDICES = {
   top: 386,
   bottom: 374,
   irisCenter: 473,
+  outer: 362,
+  inner: 263,
 };
 const MEDIAPIPE_VERSION = '0.10.34';
 const MEDIAPIPE_WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
@@ -98,8 +107,8 @@ export function TextEditor({
   const isTrackingFramePendingRef = useRef(false);
   const headTrackingStatusRef = useRef<HeadTrackingStatus>('idle');
   const calibrationStartedAtRef = useRef<number | null>(null);
-  const calibrationSamplesRef = useRef<number[]>([]);
-  const learnedBaselineRef = useRef<number | null>(null);
+  const calibrationSamplesRef = useRef<AttentionPoint[]>([]);
+  const learnedBaselineRef = useRef<AttentionPoint | null>(null);
   const isUserTyping = useRef(false);
   const hideTimerRef = useRef<number | null>(null);
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
@@ -484,12 +493,12 @@ export function TextEditor({
   };
 
   const updateCalibrationState = (result: FaceLandmarkerResult | null, now: number) => {
-    const faceCenterY = getTrackedFaceCenterY(result?.faceLandmarks[0]);
+    const faceCenterPoint = getTrackedFaceCenterPoint(result?.faceLandmarks[0]);
     const startedAt = calibrationStartedAtRef.current ?? now;
     calibrationStartedAtRef.current = startedAt;
 
-    if (faceCenterY !== null) {
-      calibrationSamplesRef.current.push(faceCenterY);
+    if (faceCenterPoint !== null) {
+      calibrationSamplesRef.current.push(faceCenterPoint);
     }
 
     const elapsed = now - startedAt;
@@ -507,7 +516,7 @@ export function TextEditor({
       return;
     }
 
-    learnedBaselineRef.current = getAverage(calibrationSamplesRef.current);
+    learnedBaselineRef.current = getAveragePoint(calibrationSamplesRef.current);
     setCalibrationProgress(1);
     setHeadTrackingStatus('active');
   };
@@ -517,8 +526,8 @@ export function TextEditor({
       return null;
     }
 
-    const trackedAttentionY = getTrackedAttentionY(result.faceLandmarks[0], learnedBaselineRef.current, settings);
-    if (trackedAttentionY === null) {
+    const trackedAttentionPoint = getTrackedAttentionPoint(result.faceLandmarks[0], learnedBaselineRef.current, settings);
+    if (trackedAttentionPoint === null) {
       return null;
     }
 
@@ -543,7 +552,8 @@ export function TextEditor({
     }
 
     const scrollRect = editorScrollRef.current.getBoundingClientRect();
-    const targetY = scrollRect.top + trackedAttentionY * scrollRect.height;
+    const targetY = scrollRect.top + trackedAttentionPoint.y * scrollRect.height;
+    const targetX = scrollRect.left + trackedAttentionPoint.x * scrollRect.width;
 
     let nearestSentence: HTMLElement | null = null;
     let nearestDistance = Number.POSITIVE_INFINITY;
@@ -551,7 +561,10 @@ export function TextEditor({
     for (const sentenceElement of visibleSentences) {
       const sentenceRect = sentenceElement.getBoundingClientRect();
       const sentenceCenterY = sentenceRect.top + sentenceRect.height / 2;
-      const distance = Math.abs(sentenceCenterY - targetY);
+      const sentenceCenterX = sentenceRect.left + sentenceRect.width / 2;
+      const normalizedDy = Math.abs(sentenceCenterY - targetY) / scrollRect.height;
+      const normalizedDx = Math.abs(sentenceCenterX - targetX) / scrollRect.width;
+      const distance = normalizedDy * 1.8 + normalizedDx;
       if (distance < nearestDistance) {
         nearestDistance = distance;
         nearestSentence = sentenceElement;
@@ -1077,66 +1090,85 @@ function buildFaceLandmarkerOptions(delegate: 'GPU' | 'CPU') {
   };
 }
 
-function getTrackedFaceCenterY(landmarks: NormalizedLandmark[] | undefined): number | null {
+function getTrackedFaceCenterPoint(landmarks: NormalizedLandmark[] | undefined): AttentionPoint | null {
   if (!landmarks || landmarks.length === 0) {
     return null;
   }
 
   let minY = Number.POSITIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
 
   for (const landmark of landmarks) {
     minY = Math.min(minY, landmark.y);
     maxY = Math.max(maxY, landmark.y);
+    minX = Math.min(minX, landmark.x);
+    maxX = Math.max(maxX, landmark.x);
   }
 
-  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY) || !Number.isFinite(minX) || !Number.isFinite(maxX)) {
     return null;
   }
 
-  return clamp((minY + maxY) / 2, 0, 1);
+  return {
+    x: clamp((minX + maxX) / 2, 0, 1),
+    y: clamp((minY + maxY) / 2, 0, 1),
+  };
 }
 
-function getTrackedAttentionY(
+function getTrackedAttentionPoint(
   landmarks: NormalizedLandmark[] | undefined,
-  learnedBaselineY: number | null,
+  learnedBaselinePoint: AttentionPoint | null,
   settings: ReaderSettings
-): number | null {
-  const faceCenterY = getTrackedFaceCenterY(landmarks);
-  if (faceCenterY === null) {
+): AttentionPoint | null {
+  const faceCenterPoint = getTrackedFaceCenterPoint(landmarks);
+  if (faceCenterPoint === null) {
     return null;
   }
 
-  const remappedHeadY = remapHeadTrackingY(faceCenterY, learnedBaselineY, settings);
-  const irisOffsetY = getIrisVerticalOffset(landmarks);
+  const remappedHeadPoint = remapHeadTrackingPoint(faceCenterPoint, learnedBaselinePoint, settings);
+  const irisOffset = getIrisOffset(landmarks);
 
-  if (irisOffsetY === null) {
-    return remappedHeadY;
+  if (irisOffset === null) {
+    return remappedHeadPoint;
   }
 
-  return clamp(
-    remappedHeadY + irisOffsetY * settings.irisTrackingSensitivity,
-    HEAD_TRACKING_MIN_Y,
-    HEAD_TRACKING_MAX_Y
-  );
+  return {
+    x: clamp(remappedHeadPoint.x + irisOffset.x * settings.irisTrackingSensitivity, 0.05, 0.95),
+    y: clamp(
+      remappedHeadPoint.y + irisOffset.y * settings.irisTrackingSensitivity,
+      HEAD_TRACKING_MIN_Y,
+      HEAD_TRACKING_MAX_Y
+    ),
+  };
 }
 
-function remapHeadTrackingY(faceCenterY: number, learnedBaselineY: number | null, settings: ReaderSettings): number {
-  const centeredY = faceCenterY - (learnedBaselineY ?? 0.5);
-  return clamp(
-    settings.trackingNeutralLineHeight + centeredY * settings.headTrackingSensitivity,
-    HEAD_TRACKING_MIN_Y,
-    HEAD_TRACKING_MAX_Y
-  );
+function remapHeadTrackingPoint(
+  faceCenterPoint: AttentionPoint,
+  learnedBaselinePoint: AttentionPoint | null,
+  settings: ReaderSettings
+): AttentionPoint {
+  const centeredX = faceCenterPoint.x - (learnedBaselinePoint?.x ?? 0.5);
+  const centeredY = faceCenterPoint.y - (learnedBaselinePoint?.y ?? 0.5);
+
+  return {
+    x: clamp(0.5 + centeredX * 0.9, 0.05, 0.95),
+    y: clamp(
+      settings.trackingNeutralLineHeight + centeredY * settings.headTrackingSensitivity,
+      HEAD_TRACKING_MIN_Y,
+      HEAD_TRACKING_MAX_Y
+    ),
+  };
 }
 
-function getIrisVerticalOffset(landmarks: NormalizedLandmark[] | undefined): number | null {
+function getIrisOffset(landmarks: NormalizedLandmark[] | undefined): AttentionPoint | null {
   if (!landmarks || landmarks.length <= RIGHT_EYE_INDICES.irisCenter) {
     return null;
   }
 
-  const leftEyeOffset = getEyeVerticalOffset(landmarks, LEFT_EYE_INDICES);
-  const rightEyeOffset = getEyeVerticalOffset(landmarks, RIGHT_EYE_INDICES);
+  const leftEyeOffset = getEyeOffset(landmarks, LEFT_EYE_INDICES);
+  const rightEyeOffset = getEyeOffset(landmarks, RIGHT_EYE_INDICES);
 
   if (leftEyeOffset === null && rightEyeOffset === null) {
     return null;
@@ -1150,26 +1182,23 @@ function getIrisVerticalOffset(landmarks: NormalizedLandmark[] | undefined): num
     return leftEyeOffset;
   }
 
-  return (leftEyeOffset + rightEyeOffset) / 2;
+  return {
+    x: (leftEyeOffset.x + rightEyeOffset.x) / 2,
+    y: (leftEyeOffset.y + rightEyeOffset.y) / 2,
+  };
 }
 
-function getAverage(values: number[]): number {
-  if (values.length === 0) {
-    return 0.5;
-  }
-
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function getEyeVerticalOffset(
+function getEyeOffset(
   landmarks: NormalizedLandmark[],
-  indices: { top: number; bottom: number; irisCenter: number }
-): number | null {
+  indices: { top: number; bottom: number; irisCenter: number; outer: number; inner: number }
+): AttentionPoint | null {
   const top = landmarks[indices.top];
   const bottom = landmarks[indices.bottom];
   const irisCenter = landmarks[indices.irisCenter];
+  const outer = landmarks[indices.outer];
+  const inner = landmarks[indices.inner];
 
-  if (!top || !bottom || !irisCenter) {
+  if (!top || !bottom || !irisCenter || !outer || !inner) {
     return null;
   }
 
@@ -1178,12 +1207,34 @@ function getEyeVerticalOffset(
     return null;
   }
 
-  const irisPosition = (irisCenter.y - top.y) / (bottom.y - top.y);
-  if (!Number.isFinite(irisPosition)) {
+  const eyeLeftX = Math.min(outer.x, inner.x);
+  const eyeRightX = Math.max(outer.x, inner.x);
+  const eyeWidth = eyeRightX - eyeLeftX;
+  if (eyeWidth < 0.0001) {
     return null;
   }
 
-  return clamp(irisPosition - 0.5, -1, 1);
+  const irisPosition = (irisCenter.y - top.y) / (bottom.y - top.y);
+  const irisHorizontalPosition = (irisCenter.x - eyeLeftX) / eyeWidth;
+  if (!Number.isFinite(irisPosition) || !Number.isFinite(irisHorizontalPosition)) {
+    return null;
+  }
+
+  return {
+    x: clamp(irisHorizontalPosition - 0.5, -1, 1),
+    y: clamp(irisPosition - 0.5, -1, 1),
+  };
+}
+
+function getAveragePoint(values: AttentionPoint[]): AttentionPoint {
+  if (values.length === 0) {
+    return { x: 0.5, y: 0.5 };
+  }
+
+  return {
+    x: values.reduce((sum, value) => sum + value.x, 0) / values.length,
+    y: values.reduce((sum, value) => sum + value.y, 0) / values.length,
+  };
 }
 
 function getHeadTrackingErrorMessage(error: unknown): string {

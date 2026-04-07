@@ -14,10 +14,10 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   fontWeight: 400,
   backgroundColor: '#FFF9E6',
   textColor: '#000000',
-  headTrackingSensitivity: 1.35,
+  headTrackingSensitivity: 1.65,
   irisTrackingSensitivity: 0.16,
   trackingSteadiness: 2,
-  trackingNeutralLineHeight: 0.34,
+  trackingNeutralLineHeight: 0.3,
 };
 
 const DocumentModal = lazy(() =>

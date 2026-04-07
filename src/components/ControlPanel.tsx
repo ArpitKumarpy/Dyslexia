@@ -304,7 +304,7 @@ export function ControlPanel({
                 label="Head Sensitivity"
                 value={settings.headTrackingSensitivity.toFixed(2)}
                 min="0.8"
-                max="2.2"
+                max="3"
                 step="0.05"
                 currentValue={settings.headTrackingSensitivity}
                 onChange={(event) => onSettingsChange({
@@ -316,7 +316,7 @@ export function ControlPanel({
                 label="Eye Sensitivity"
                 value={settings.irisTrackingSensitivity.toFixed(2)}
                 min="0.04"
-                max="0.35"
+                max="0.75"
                 step="0.01"
                 currentValue={settings.irisTrackingSensitivity}
                 onChange={(event) => onSettingsChange({
