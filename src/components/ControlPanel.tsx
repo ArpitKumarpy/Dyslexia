@@ -294,6 +294,62 @@ export function ControlPanel({
             description="Experimental. Use the webcam to guide a reading line without storing video."
             tone="violet"
           />
+          <div className="rounded-2xl border border-violet-100 bg-violet-50/60 px-4 py-4">
+            <p className="text-sm font-semibold text-violet-950">Tracking Fine-Tuning</p>
+            <p className="mt-1 text-sm leading-6 text-violet-800">
+              Adjust how strongly head and eye movement influence the guided reading line.
+            </p>
+            <div className="mt-4 space-y-4">
+              <RangeField
+                label="Head Sensitivity"
+                value={settings.headTrackingSensitivity.toFixed(2)}
+                min="0.8"
+                max="2.2"
+                step="0.05"
+                currentValue={settings.headTrackingSensitivity}
+                onChange={(event) => onSettingsChange({
+                  ...settings,
+                  headTrackingSensitivity: parseFloat(event.target.value),
+                })}
+              />
+              <RangeField
+                label="Eye Sensitivity"
+                value={settings.irisTrackingSensitivity.toFixed(2)}
+                min="0.04"
+                max="0.35"
+                step="0.01"
+                currentValue={settings.irisTrackingSensitivity}
+                onChange={(event) => onSettingsChange({
+                  ...settings,
+                  irisTrackingSensitivity: parseFloat(event.target.value),
+                })}
+              />
+              <RangeField
+                label="Tracking Steadiness"
+                value={`${settings.trackingSteadiness.toFixed(0)} hits`}
+                min="1"
+                max="5"
+                step="1"
+                currentValue={settings.trackingSteadiness}
+                onChange={(event) => onSettingsChange({
+                  ...settings,
+                  trackingSteadiness: parseInt(event.target.value, 10),
+                })}
+              />
+              <RangeField
+                label="Neutral Line Height"
+                value={`${Math.round(settings.trackingNeutralLineHeight * 100)}%`}
+                min="0.2"
+                max="0.5"
+                step="0.01"
+                currentValue={settings.trackingNeutralLineHeight}
+                onChange={(event) => onSettingsChange({
+                  ...settings,
+                  trackingNeutralLineHeight: parseFloat(event.target.value),
+                })}
+              />
+            </div>
+          </div>
         </SectionCard>
 
         <SectionCard

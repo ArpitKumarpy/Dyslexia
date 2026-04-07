@@ -47,14 +47,10 @@ type WordTarget = {
 };
 
 const HEAD_TRACKING_SAMPLE_MS = 220;
-const HEAD_TRACKING_STABILITY_THRESHOLD = 2;
 const HEAD_TRACKING_CALIBRATION_MS = 2800;
 const HEAD_TRACKING_MIN_CALIBRATION_SAMPLES = 6;
-const HEAD_TRACKING_NEUTRAL_TARGET_Y = 0.34;
-const HEAD_TRACKING_VERTICAL_GAIN = 1.35;
 const HEAD_TRACKING_MIN_Y = 0.12;
 const HEAD_TRACKING_MAX_Y = 0.9;
-const IRIS_VERTICAL_GAIN = 0.16;
 const LEFT_EYE_INDICES = {
   top: 159,
   bottom: 145,
@@ -473,7 +469,7 @@ export function TextEditor({
 
       pendingHeadSentenceHitsRef.current += 1;
       if (
-        pendingHeadSentenceHitsRef.current >= HEAD_TRACKING_STABILITY_THRESHOLD &&
+        pendingHeadSentenceHitsRef.current >= settings.trackingSteadiness &&
         activeHeadSentenceIndexRef.current !== sentenceIndex
       ) {
         setHeadTrackedSentenceIndex(sentenceIndex);
@@ -521,7 +517,7 @@ export function TextEditor({
       return null;
     }
 
-    const trackedAttentionY = getTrackedAttentionY(result.faceLandmarks[0], learnedBaselineRef.current);
+    const trackedAttentionY = getTrackedAttentionY(result.faceLandmarks[0], learnedBaselineRef.current, settings);
     if (trackedAttentionY === null) {
       return null;
     }
@@ -1103,14 +1099,15 @@ function getTrackedFaceCenterY(landmarks: NormalizedLandmark[] | undefined): num
 
 function getTrackedAttentionY(
   landmarks: NormalizedLandmark[] | undefined,
-  learnedBaselineY: number | null
+  learnedBaselineY: number | null,
+  settings: ReaderSettings
 ): number | null {
   const faceCenterY = getTrackedFaceCenterY(landmarks);
   if (faceCenterY === null) {
     return null;
   }
 
-  const remappedHeadY = remapHeadTrackingY(faceCenterY, learnedBaselineY);
+  const remappedHeadY = remapHeadTrackingY(faceCenterY, learnedBaselineY, settings);
   const irisOffsetY = getIrisVerticalOffset(landmarks);
 
   if (irisOffsetY === null) {
@@ -1118,16 +1115,16 @@ function getTrackedAttentionY(
   }
 
   return clamp(
-    remappedHeadY + irisOffsetY * IRIS_VERTICAL_GAIN,
+    remappedHeadY + irisOffsetY * settings.irisTrackingSensitivity,
     HEAD_TRACKING_MIN_Y,
     HEAD_TRACKING_MAX_Y
   );
 }
 
-function remapHeadTrackingY(faceCenterY: number, learnedBaselineY: number | null): number {
+function remapHeadTrackingY(faceCenterY: number, learnedBaselineY: number | null, settings: ReaderSettings): number {
   const centeredY = faceCenterY - (learnedBaselineY ?? 0.5);
   return clamp(
-    HEAD_TRACKING_NEUTRAL_TARGET_Y + centeredY * HEAD_TRACKING_VERTICAL_GAIN,
+    settings.trackingNeutralLineHeight + centeredY * settings.headTrackingSensitivity,
     HEAD_TRACKING_MIN_Y,
     HEAD_TRACKING_MAX_Y
   );

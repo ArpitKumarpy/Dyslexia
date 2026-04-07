@@ -14,6 +14,10 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   fontWeight: 400,
   backgroundColor: '#FFF9E6',
   textColor: '#000000',
+  headTrackingSensitivity: 1.35,
+  irisTrackingSensitivity: 0.16,
+  trackingSteadiness: 2,
+  trackingNeutralLineHeight: 0.34,
 };
 
 const DocumentModal = lazy(() =>
@@ -123,6 +127,10 @@ function App() {
         fontWeight: data.font_weight,
         backgroundColor: data.background_color,
         textColor: data.text_color,
+        headTrackingSensitivity: Number(data.head_tracking_sensitivity ?? DEFAULT_SETTINGS.headTrackingSensitivity),
+        irisTrackingSensitivity: Number(data.iris_tracking_sensitivity ?? DEFAULT_SETTINGS.irisTrackingSensitivity),
+        trackingSteadiness: Number(data.tracking_steadiness ?? DEFAULT_SETTINGS.trackingSteadiness),
+        trackingNeutralLineHeight: Number(data.tracking_neutral_line_height ?? DEFAULT_SETTINGS.trackingNeutralLineHeight),
       });
       return;
     }
@@ -160,6 +168,10 @@ function App() {
       font_weight: newSettings.fontWeight,
       background_color: newSettings.backgroundColor,
       text_color: newSettings.textColor,
+      head_tracking_sensitivity: newSettings.headTrackingSensitivity,
+      iris_tracking_sensitivity: newSettings.irisTrackingSensitivity,
+      tracking_steadiness: newSettings.trackingSteadiness,
+      tracking_neutral_line_height: newSettings.trackingNeutralLineHeight,
       updated_at: new Date().toISOString(),
     };
 
@@ -544,7 +556,7 @@ function readLocalSettings(): ReaderSettings | null {
   }
 
   try {
-    return JSON.parse(rawSettings) as ReaderSettings;
+    return { ...DEFAULT_SETTINGS, ...(JSON.parse(rawSettings) as Partial<ReaderSettings>) };
   } catch {
     return null;
   }

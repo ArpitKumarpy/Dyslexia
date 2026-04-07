@@ -6,6 +6,10 @@ export interface ReaderSettings {
   fontWeight: number;
   backgroundColor: string;
   textColor: string;
+  headTrackingSensitivity: number;
+  irisTrackingSensitivity: number;
+  trackingSteadiness: number;
+  trackingNeutralLineHeight: number;
 }
 
 export interface Document {
