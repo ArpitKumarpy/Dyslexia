@@ -1,0 +1,736 @@
+import {
+  AlignLeft,
+  AlertTriangle,
+  BrainCircuit,
+  CheckCircle2,
+  Crosshair,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  Grid,
+  Lock,
+  Minus,
+  RotateCcw,
+  X,
+  PanelLeftClose,
+  LifeBuoy,
+  Save,
+  ScanEye,
+  SlidersHorizontal,
+  Sparkles,
+  Upload,
+  Volume2,
+} from 'lucide-react';
+import { HeadTrackingStatus, ReaderSettings } from '../types';
+
+interface ControlPanelProps {
+  settings: ReaderSettings;
+  onSettingsChange: (settings: ReaderSettings) => void;
+  onPdfUpload: (file: File) => void;
+  onSaveDocument: () => void;
+  onLoadDocuments: () => void;
+  onTextToSpeech: () => void;
+  showReadingGuide: boolean;
+  onToggleReadingGuide: () => void;
+  focusMode: boolean;
+  onToggleFocusMode: () => void;
+  wordHighlight: boolean;
+  onToggleWordHighlight: () => void;
+  showDifficultWords: boolean;
+  onToggleDifficultWords: () => void;
+  showSentenceSimplification: boolean;
+  onToggleSentenceSimplification: () => void;
+  adaptiveEngineEnabled: boolean;
+  onToggleAdaptiveEngine: () => void;
+  headTrackingEnabled: boolean;
+  onToggleHeadTracking: () => void;
+  headTrackingStatus: HeadTrackingStatus;
+  isTrackingPositionInitialized: boolean;
+  onRecalibrateTracking: () => void;
+  readingMode: boolean;
+  onToggleReadingMode: () => void;
+  isSpeaking: boolean;
+  headTrackedSentenceIndex?: number | null;
+  onOpenSupportHub: () => void;
+  onOpenMlPredictionLab: () => void;
+  className?: string;
+  onCloseMobile?: () => void;
+}
+
+const FONTS = [
+  { name: 'OpenDyslexic', value: 'OpenDyslexic, sans-serif' },
+  { name: 'Arial', value: 'Arial, sans-serif' },
+  { name: 'Verdana', value: 'Verdana, sans-serif' },
+  { name: 'Times New Roman', value: '"Times New Roman", serif' },
+];
+
+const YELLOW_SHADES = [
+  '#FFF9E6', '#FFF4CC', '#FFECB3', '#FFE499', '#FFDB80', '#FFD166',
+  '#FFC94D', '#FFC133', '#FFB81A', '#FFB000',
+];
+
+const OTHER_COLORS = [
+  '#FFFFFF', '#F0F0F0', '#E8F4F8', '#E8F5E9', '#FFF3E0', '#F3E5F5',
+  '#FFE0E0', '#E0F2F7', '#FFF8DC', '#F5F5DC',
+];
+
+export function ControlPanel({
+  settings,
+  onSettingsChange,
+  onPdfUpload,
+  onSaveDocument,
+  onLoadDocuments,
+  onTextToSpeech,
+  showReadingGuide,
+  onToggleReadingGuide,
+  focusMode,
+  onToggleFocusMode,
+  wordHighlight,
+  onToggleWordHighlight,
+  showDifficultWords,
+  onToggleDifficultWords,
+  showSentenceSimplification,
+  onToggleSentenceSimplification,
+  adaptiveEngineEnabled,
+  onToggleAdaptiveEngine,
+  headTrackingEnabled,
+  onToggleHeadTracking,
+  headTrackingStatus,
+  isTrackingPositionInitialized,
+  onRecalibrateTracking,
+  onToggleReadingMode,
+  isSpeaking,
+  headTrackedSentenceIndex = null,
+  onOpenSupportHub,
+  onOpenMlPredictionLab,
+  className = '',
+  onCloseMobile,
+}: ControlPanelProps) {
+  const slidersUnlocked = headTrackingEnabled && isTrackingPositionInitialized;
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file && file.type === 'application/pdf') {
+      onPdfUpload(file);
+    }
+  };
+
+  const handleResetTrackingSliders = () => {
+    onSettingsChange({
+      ...settings,
+      headTrackingSensitivity: 1.65,
+      irisTrackingSensitivity: 0.22,
+      trackingSteadiness: 2,
+    });
+  };
+
+  return (
+    <aside className={`h-full w-full shrink-0 overflow-y-auto border-r border-stone-200 bg-stone-50 px-4 py-4 sm:px-5 sm:py-6 lg:w-[22rem] ${className}`}>
+      <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-stone-200/70">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
+              Synapse Dyslexia Reader
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold text-stone-900">Reading Workspace</h2>
+            <p className="mt-2 text-sm leading-6 text-stone-600">
+              Calm reading support with clearer wording, gentler visuals, and a dedicated reading mode.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {onCloseMobile && (
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200 lg:hidden"
+                title="Close tools"
+              >
+                <X size={18} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onToggleReadingMode}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200"
+              title="Enter reading mode"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2">
+          <PrimaryAction
+            label="Enter Reading Mode"
+            description="Hide extra controls and keep the page calm while you read."
+            onClick={onToggleReadingMode}
+            icon={<PanelLeftClose size={18} />}
+            tone="dark"
+          />
+          <PrimaryAction
+            label={
+              isSpeaking
+                ? 'Stop Reading Aloud'
+                : headTrackingEnabled && headTrackedSentenceIndex !== null
+                  ? `Read Aloud (from Sentence ${headTrackedSentenceIndex + 1})`
+                  : 'Read Aloud'
+            }
+            description={
+              !isSpeaking && headTrackingEnabled && headTrackedSentenceIndex !== null
+                ? 'Starts speaking directly from your currently eye-tracked sentence.'
+                : 'Listen to the page one sentence at a time.'
+            }
+            onClick={onTextToSpeech}
+            icon={<Volume2 size={18} />}
+            tone="green"
+          />
+          <button
+            type="button"
+            onClick={onOpenMlPredictionLab}
+            className="flex w-full items-start gap-3 rounded-2xl bg-violet-600 px-4 py-3.5 text-left text-white shadow-sm transition-colors hover:bg-violet-700"
+          >
+            <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/15">
+              <BrainCircuit size={18} />
+            </span>
+            <span>
+              <span className="block text-sm font-semibold">
+                ML Prediction Lab (ZuCo + SHAP)
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-violet-100">
+                Inspect live XGBoost cognitive load predictions, TreeSHAP feature attributions, and Table III ablations.
+              </span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-5">
+        <SectionCard
+          eyebrow="Reading"
+          title="Make the page easier to scan"
+          description="These settings change how the page looks and how strongly the current line stands out."
+        >
+          <div>
+            <label className="mb-2 block text-sm font-medium text-stone-700">
+              Reading Font
+            </label>
+            <select
+              value={settings.fontFamily}
+              onChange={(event) => onSettingsChange({ ...settings, fontFamily: event.target.value })}
+              className="w-full rounded-2xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm text-stone-800 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            >
+              {FONTS.map((font) => (
+                <option key={font.value} value={font.value}>
+                  {font.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <RangeField
+            label="Text Size"
+            value={`${settings.fontSize}px`}
+            min="12"
+            max="48"
+            currentValue={settings.fontSize}
+            onChange={(event) => onSettingsChange({ ...settings, fontSize: parseInt(event.target.value, 10) })}
+          />
+          <RangeField
+            label="Line Spacing"
+            value={settings.lineSpacing.toFixed(1)}
+            min="1"
+            max="3"
+            step="0.1"
+            currentValue={settings.lineSpacing}
+            onChange={(event) => onSettingsChange({ ...settings, lineSpacing: parseFloat(event.target.value) })}
+          />
+          <RangeField
+            label="Letter Spacing"
+            value={`${settings.letterSpacing.toFixed(1)}px`}
+            min="0"
+            max="5"
+            step="0.1"
+            currentValue={settings.letterSpacing}
+            onChange={(event) => onSettingsChange({ ...settings, letterSpacing: parseFloat(event.target.value) })}
+          />
+          <RangeField
+            label="Text Weight"
+            value={`${settings.fontWeight}`}
+            min="300"
+            max="900"
+            step="100"
+            currentValue={settings.fontWeight}
+            onChange={(event) => onSettingsChange({ ...settings, fontWeight: parseInt(event.target.value, 10) })}
+          />
+        </SectionCard>
+
+        <SectionCard
+          eyebrow="Color"
+          title="Reduce glare and visual stress"
+          description="Warm backgrounds and softer contrast usually feel easier over longer reading sessions."
+        >
+          <ColorPalette
+            label="Warm backgrounds"
+            colors={YELLOW_SHADES}
+            selectedColor={settings.backgroundColor}
+            onSelect={(backgroundColor) => onSettingsChange({ ...settings, backgroundColor })}
+          />
+          <ColorPalette
+            label="Other calm backgrounds"
+            colors={OTHER_COLORS}
+            selectedColor={settings.backgroundColor}
+            onSelect={(backgroundColor) => onSettingsChange({ ...settings, backgroundColor })}
+          />
+          <div>
+            <p className="mb-2 text-sm font-medium text-stone-700">Text Color</p>
+            <div className="flex gap-2">
+              {['#000000', '#1a1a1a', '#333333', '#666666'].map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => onSettingsChange({ ...settings, textColor: color })}
+                  className={`h-12 w-12 rounded-2xl border-2 transition-transform hover:scale-105 ${
+                    settings.textColor === color ? 'border-amber-500' : 'border-stone-300'
+                  }`}
+                  style={{ backgroundColor: color }}
+                  title={`Use text color ${color}`}
+                />
+              ))}
+            </div>
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          eyebrow="Support"
+          title="Guided reading help"
+          description="Clear labels and simple choices make it easier to understand what each tool will do."
+        >
+          <ToggleButton
+            active={showReadingGuide}
+            onClick={onToggleReadingGuide}
+            icon={showReadingGuide ? <Eye size={18} /> : <EyeOff size={18} />}
+            label="Reading Ruler"
+            description="Keep a soft highlight over the line you are reading."
+            tone="blue"
+          />
+          <ToggleButton
+            active={focusMode}
+            onClick={onToggleFocusMode}
+            icon={<Grid size={18} />}
+            label="Tunnel Vision"
+            description="Simulate a focused reading tunnel by dimming surrounding text above and below your active reading line."
+            tone="blue"
+          />
+          <ToggleButton
+            active={wordHighlight}
+            onClick={onToggleWordHighlight}
+            icon={<Minus size={18} />}
+            label="Add Word Spacing"
+            description="Create a little more room between words to reduce crowding."
+            tone="blue"
+          />
+          <ToggleButton
+            active={showDifficultWords}
+            onClick={onToggleDifficultWords}
+            icon={<AlertTriangle size={18} />}
+            label="Highlight Tricky Words"
+            description="Mark words that may need extra support without taking over the page."
+            tone="amber"
+          />
+          <ToggleButton
+            active={showSentenceSimplification}
+            onClick={onToggleSentenceSimplification}
+            icon={<AlignLeft size={18} />}
+            label="Break Long Sentences"
+            description="Split longer sentences into clearer chunks and show a simpler reading path."
+            tone="teal"
+          />
+          <ToggleButton
+            active={adaptiveEngineEnabled}
+            onClick={onToggleAdaptiveEngine}
+            icon={<Sparkles size={18} />}
+            label="Adaptive Reading Engine"
+            description="Dynamically boost font weight, expand word spacing, and slow TTS pacing on high-cognitive-load sentences."
+            tone="amber"
+          />
+          <ToggleButton
+            active={headTrackingEnabled}
+            onClick={onToggleHeadTracking}
+            icon={<ScanEye size={18} />}
+            label="Eye & Head Tracking"
+            description="Track and highlight your active reading line, sentence, and paragraph locally via webcam."
+            tone="violet"
+          />
+          <div className="space-y-4 rounded-2xl border border-violet-200/80 bg-violet-50/70 px-4 py-4">
+            <div className="rounded-xl border border-violet-200 bg-white p-3.5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-violet-900">
+                  <Crosshair size={12} />
+                  Step 1: Reading Position
+                </span>
+                {slidersUnlocked ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                    <CheckCircle2 size={14} />
+                    Locked ({Math.round(settings.trackingNeutralLineHeight * 100)}%)
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium text-amber-700">
+                    {headTrackingEnabled
+                      ? headTrackingStatus === 'calibrating' || headTrackingStatus === 'positioning'
+                        ? 'Initializing...'
+                        : 'Pending'
+                      : 'Off'}
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-xs leading-5 text-stone-600">
+                {slidersUnlocked
+                  ? 'Your starting reading line, head pose, and eye gaze baseline are initialized. Re-initialize anytime you shift posture.'
+                  : 'First initialize where you naturally look on the page so the tracker learns your exact reading line and eye baseline.'}
+              </p>
+              <button
+                type="button"
+                onClick={onRecalibrateTracking}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-700"
+              >
+                <RotateCcw size={14} />
+                {headTrackingEnabled
+                  ? slidersUnlocked
+                    ? 'Re-initialize Reading Position'
+                    : 'Restart Position Initialization'
+                  : 'Start & Initialize Reading Position'}
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-violet-200 bg-white p-3.5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-violet-900">
+                  <SlidersHorizontal size={12} />
+                  Step 2: Fine-Tuning Sliders
+                </span>
+                {slidersUnlocked ? (
+                  <button
+                    type="button"
+                    onClick={handleResetTrackingSliders}
+                    className="text-xs font-medium text-violet-700 underline-offset-2 hover:underline"
+                  >
+                    Reset defaults
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-stone-500">
+                    <Lock size={12} />
+                    Complete Step 1 first
+                  </span>
+                )}
+              </div>
+
+              {!slidersUnlocked && (
+                <p className="mt-2 rounded-lg bg-stone-100 px-2.5 py-2 text-xs leading-5 text-stone-600">
+                  Initialize your reading position in Step 1 first. Once locked, these sliders unlock for real-time fine-tuning.
+                </p>
+              )}
+
+              <div className={`mt-3 space-y-3.5 transition-opacity ${slidersUnlocked ? 'opacity-100' : 'pointer-events-none opacity-45'}`}>
+                <RangeField
+                  label="Reading Position Height"
+                  value={`${Math.round(settings.trackingNeutralLineHeight * 100)}%`}
+                  min="0.15"
+                  max="0.75"
+                  step="0.01"
+                  currentValue={settings.trackingNeutralLineHeight}
+                  disabled={!slidersUnlocked}
+                  onChange={(event) => onSettingsChange({
+                    ...settings,
+                    trackingNeutralLineHeight: parseFloat(event.target.value),
+                  })}
+                />
+                <RangeField
+                  label="Eye (Iris) Sensitivity"
+                  value={settings.irisTrackingSensitivity.toFixed(2)}
+                  min="0.04"
+                  max="0.75"
+                  step="0.01"
+                  currentValue={settings.irisTrackingSensitivity}
+                  disabled={!slidersUnlocked}
+                  onChange={(event) => onSettingsChange({
+                    ...settings,
+                    irisTrackingSensitivity: parseFloat(event.target.value),
+                  })}
+                />
+                <RangeField
+                  label="Head Sensitivity"
+                  value={settings.headTrackingSensitivity.toFixed(2)}
+                  min="0.8"
+                  max="3"
+                  step="0.05"
+                  currentValue={settings.headTrackingSensitivity}
+                  disabled={!slidersUnlocked}
+                  onChange={(event) => onSettingsChange({
+                    ...settings,
+                    headTrackingSensitivity: parseFloat(event.target.value),
+                  })}
+                />
+                <RangeField
+                  label="Line Lock Steadiness"
+                  value={`${settings.trackingSteadiness.toFixed(0)} hits`}
+                  min="1"
+                  max="5"
+                  step="1"
+                  currentValue={settings.trackingSteadiness}
+                  disabled={!slidersUnlocked}
+                  onChange={(event) => onSettingsChange({
+                    ...settings,
+                    trackingSteadiness: parseInt(event.target.value, 10),
+                  })}
+                />
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          eyebrow="Support"
+          title="Trusted outside help"
+          description="Open a curated hub with trusted guides, videos, helplines, and India-specific resources."
+        >
+          <PrimaryAction
+            label="Open Support Hub"
+            description="Browse trusted dyslexia resources, official videos, helplines, and local help links."
+            onClick={onOpenSupportHub}
+            icon={<LifeBuoy size={18} />}
+            tone="stone"
+          />
+        </SectionCard>
+
+        <SectionCard
+          eyebrow="Documents"
+          title="Bring in or save reading material"
+          description="Keep document actions separate so the reading tools stay uncluttered."
+        >
+          <PrimaryAction
+            label="Upload PDF"
+            description="Import a PDF into the reading workspace."
+            icon={<Upload size={18} />}
+            tone="blue"
+            asLabel
+          >
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+          </PrimaryAction>
+          <PrimaryAction
+            label="Save Document"
+            description="Save the current page for later."
+            onClick={onSaveDocument}
+            icon={<Save size={18} />}
+            tone="green"
+          />
+          <PrimaryAction
+            label="Load Document"
+            description="Open a saved document."
+            onClick={onLoadDocuments}
+            icon={<FolderOpen size={18} />}
+            tone="stone"
+          />
+        </SectionCard>
+      </div>
+    </aside>
+  );
+}
+
+function SectionCard({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-stone-200/70">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">{eyebrow}</p>
+      <h3 className="mt-2 text-lg font-semibold text-stone-900">{title}</h3>
+      <p className="mt-1 text-sm leading-6 text-stone-600">{description}</p>
+      <div className="mt-4 space-y-4">{children}</div>
+    </section>
+  );
+}
+
+function RangeField({
+  label,
+  value,
+  currentValue,
+  onChange,
+  min,
+  max,
+  step,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  currentValue: number;
+  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  min: string;
+  max: string;
+  step?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-medium text-stone-700">
+        {label}: {value}
+      </label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={currentValue}
+        onChange={onChange}
+        disabled={disabled}
+        className="w-full disabled:cursor-not-allowed"
+      />
+    </div>
+  );
+}
+
+function ColorPalette({
+  label,
+  colors,
+  selectedColor,
+  onSelect,
+}: {
+  label: string;
+  colors: string[];
+  selectedColor: string;
+  onSelect: (color: string) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium text-stone-700">{label}</p>
+      <div className="grid grid-cols-5 gap-2">
+        {colors.map((color) => (
+          <button
+            key={color}
+            type="button"
+            onClick={() => onSelect(color)}
+            className={`h-10 w-10 rounded-2xl border-2 transition-transform hover:scale-105 ${
+              selectedColor === color ? 'border-amber-500 scale-105' : 'border-stone-300'
+            }`}
+            style={{ backgroundColor: color }}
+            title={color}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ToggleButton({
+  active,
+  onClick,
+  icon,
+  label,
+  description,
+  tone,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  description: string;
+  tone: 'blue' | 'amber' | 'teal' | 'violet';
+}) {
+  const activeClasses = {
+    blue: 'bg-blue-600 text-white shadow-blue-200',
+    amber: 'bg-amber-500 text-white shadow-amber-200',
+    teal: 'bg-teal-600 text-white shadow-teal-200',
+    violet: 'bg-violet-600 text-white shadow-violet-200',
+  }[tone];
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-all ${
+        active
+          ? `border-transparent ${activeClasses} shadow-sm`
+          : 'border-stone-200 bg-stone-50 text-stone-700 hover:border-stone-300 hover:bg-stone-100'
+      }`}
+    >
+      <span className={`mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+        active ? 'bg-white text-stone-700' : 'bg-white text-stone-500 ring-1 ring-stone-200'
+      }`}>
+        {icon}
+      </span>
+      <span>
+        <span className="block text-sm font-semibold">{label}</span>
+        <span className={`mt-1 block text-sm leading-5 ${active ? 'text-white/85' : 'text-stone-500'}`}>
+          {description}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function PrimaryAction({
+  label,
+  description,
+  onClick,
+  icon,
+  tone,
+  asLabel,
+  children,
+}: {
+  label: string;
+  description: string;
+  onClick?: () => void;
+  icon: React.ReactNode;
+  tone: 'blue' | 'green' | 'stone' | 'dark';
+  asLabel?: boolean;
+  children?: React.ReactNode;
+}) {
+  const toneClasses = {
+    blue: 'bg-blue-600 text-white hover:bg-blue-700',
+    green: 'bg-emerald-600 text-white hover:bg-emerald-700',
+    stone: 'bg-stone-700 text-white hover:bg-stone-800',
+    dark: 'bg-stone-900 text-white hover:bg-stone-700',
+  }[tone];
+
+  const content = (
+    <>
+      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-stone-700">
+        {icon}
+      </span>
+      <span>
+        <span className="block text-sm font-semibold">{label}</span>
+        <span className="mt-1 block text-sm text-white/80">{description}</span>
+      </span>
+      {children}
+    </>
+  );
+
+  if (asLabel) {
+    return (
+      <label className={`flex w-full cursor-pointer items-start gap-3 rounded-2xl px-4 py-3 transition-colors ${toneClasses}`}>
+        {content}
+      </label>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-start gap-3 rounded-2xl px-4 py-3 text-left transition-colors ${toneClasses}`}
+    >
+      {content}
+    </button>
+  );
+}

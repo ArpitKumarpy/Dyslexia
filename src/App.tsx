@@ -1,0 +1,757 @@
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { ArrowLeft, BrainCircuit, LifeBuoy, Menu, PanelLeftClose, Volume2 } from 'lucide-react';
+import { ControlPanel } from './components/ControlPanel';
+import { TextEditor } from './components/TextEditor/TextEditor';
+import { HeadTrackingStatus, ReaderSettings, Document } from './types';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { analyzeSentence, splitIntoSentences } from './utils/sentences';
+
+const DEFAULT_SETTINGS: ReaderSettings = {
+  fontFamily: 'Arial, sans-serif',
+  fontSize: 18,
+  lineSpacing: 1.8,
+  letterSpacing: 0.5,
+  fontWeight: 400,
+  backgroundColor: '#FFF9E6',
+  textColor: '#000000',
+  headTrackingSensitivity: 1.65,
+  irisTrackingSensitivity: 0.16,
+  trackingSteadiness: 2,
+  trackingNeutralLineHeight: 0.3,
+};
+
+const DocumentModal = lazy(() =>
+  import('./components/DocumentModal').then((module) => ({ default: module.DocumentModal }))
+);
+const SupportHub = lazy(() =>
+  import('./components/SupportHub').then((module) => ({ default: module.SupportHub }))
+);
+
+const LOCAL_SETTINGS_KEY = 'reader_settings';
+const LOCAL_DOCUMENTS_KEY = 'reader_documents';
+const SESSION_ID_KEY = 'session_id';
+
+const INITIAL_READING_PASSAGE = `Reading feels much easier when each line and paragraph stay clearly anchored in view. Many readers with dyslexia lose their place when moving from the end of one visual line to the beginning of the next line. By combining gentle head posture guidance with calibrated iris tracking, the reading workspace can highlight both your current line and your active paragraph at the same time.
+
+In the first initialization step, you simply look at your starting reading line so the tracker learns your natural posture and eye angle. Once your reading position is locked, the fine-tuning sliders unlock so you can adjust eye sensitivity, head sensitivity, and line steadiness at your own pace.
+
+As you continue reading into a new paragraph, the paragraph frame and line guide glide with your attention. You can click any word for syllable pronunciation support and ZuCo SHAP cognitive load analysis, or highlight any phrase to trigger isolated Speak Selection audio.`;
+
+function App() {
+  const [content, setContent] = useState(INITIAL_READING_PASSAGE);
+  const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_SETTINGS);
+  const [showReadingGuide, setShowReadingGuide] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [wordHighlight, setWordHighlight] = useState(false);
+  const [showDifficultWords, setShowDifficultWords] = useState(false);
+  const [showSentenceSimplification, setShowSentenceSimplification] = useState(false);
+  const [adaptiveEngineEnabled, setAdaptiveEngineEnabled] = useState(false);
+  const [highLoadSentenceIndices, setHighLoadSentenceIndices] = useState<number[]>([]);
+  const [headTrackingEnabled, setHeadTrackingEnabled] = useState(false);
+  const [headTrackingStatus, setHeadTrackingStatus] = useState<HeadTrackingStatus>('idle');
+  const [isTrackingPositionInitialized, setIsTrackingPositionInitialized] = useState(false);
+  const [recalibrateTrigger, setRecalibrateTrigger] = useState(0);
+  const [readingMode, setReadingMode] = useState(false);
+  const [hoverPronunciationRate, setHoverPronunciationRate] = useState(() => {
+    const storedRate = localStorage.getItem('hover_pronunciation_rate');
+    return storedRate ? parseFloat(storedRate) : 0.85;
+  });
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [showSupportHub, setShowSupportHub] = useState(false);
+  const [showMlPredictionLab, setShowMlPredictionLab] = useState(false);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+  const [pdfFallbackMessage, setPdfFallbackMessage] = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [activeSentenceIndex, setActiveSentenceIndex] = useState<number | null>(null);
+  const [sentenceTtsPlayCounts, setSentenceTtsPlayCounts] = useState<Record<number, number>>({});
+  const [headTrackedSentenceIndex, setHeadTrackedSentenceIndex] = useState<number | null>(null);
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!localStorage.getItem(SESSION_ID_KEY)) {
+      localStorage.setItem(SESSION_ID_KEY, crypto.randomUUID());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    const syncAuthUser = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        setAuthUserId(user?.id ?? null);
+      } catch {
+        setAuthUserId(null);
+      }
+    };
+
+    void syncAuthUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUserId(session?.user?.id ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [authUserId]);
+
+  useEffect(() => {
+    localStorage.setItem('hover_pronunciation_rate', hoverPronunciationRate.toString());
+  }, [hoverPronunciationRate]);
+
+  useEffect(() => {
+    if (!content.trim()) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setActiveSentenceIndex(null);
+      setSentenceTtsPlayCounts({});
+    }
+  }, [content]);
+
+  useEffect(() => {
+    if (readingMode) {
+      setMobilePanelOpen(false);
+    }
+  }, [readingMode]);
+
+  const loadSettings = async () => {
+    if (!authUserId) {
+      const localSettings = readLocalSettings();
+      if (localSettings) {
+        setSettings(localSettings);
+      }
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('user_preferences')
+      .select('*')
+      .eq('user_id', authUserId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Could not load cloud settings:', error.message);
+      const localSettings = readLocalSettings();
+      if (localSettings) {
+        setSettings(localSettings);
+      }
+      return;
+    }
+
+    if (data) {
+      setSettings({
+        fontFamily: data.font_family,
+        fontSize: data.font_size,
+        lineSpacing: parseFloat(data.line_spacing),
+        letterSpacing: parseFloat(data.letter_spacing),
+        fontWeight: data.font_weight,
+        backgroundColor: data.background_color,
+        textColor: data.text_color,
+        headTrackingSensitivity: Number(data.head_tracking_sensitivity ?? DEFAULT_SETTINGS.headTrackingSensitivity),
+        irisTrackingSensitivity: Number(data.iris_tracking_sensitivity ?? DEFAULT_SETTINGS.irisTrackingSensitivity),
+        trackingSteadiness: Number(data.tracking_steadiness ?? DEFAULT_SETTINGS.trackingSteadiness),
+        trackingNeutralLineHeight: Number(data.tracking_neutral_line_height ?? DEFAULT_SETTINGS.trackingNeutralLineHeight),
+      });
+      return;
+    }
+
+    const localSettings = readLocalSettings();
+    if (localSettings) {
+      setSettings(localSettings);
+    }
+  };
+
+  const saveSettings = async (newSettings: ReaderSettings) => {
+    writeLocalSettings(newSettings);
+
+    if (!authUserId) {
+      return;
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('user_preferences')
+      .select('id')
+      .eq('user_id', authUserId)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error('Could not check existing cloud settings:', existingError.message);
+      return;
+    }
+
+    const settingsData = {
+      user_id: authUserId,
+      font_family: newSettings.fontFamily,
+      font_size: newSettings.fontSize,
+      line_spacing: newSettings.lineSpacing,
+      letter_spacing: newSettings.letterSpacing,
+      font_weight: newSettings.fontWeight,
+      background_color: newSettings.backgroundColor,
+      text_color: newSettings.textColor,
+      head_tracking_sensitivity: newSettings.headTrackingSensitivity,
+      iris_tracking_sensitivity: newSettings.irisTrackingSensitivity,
+      tracking_steadiness: newSettings.trackingSteadiness,
+      tracking_neutral_line_height: newSettings.trackingNeutralLineHeight,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (existing) {
+      const { error } = await supabase
+        .from('user_preferences')
+        .update(settingsData)
+        .eq('id', existing.id);
+
+      if (error) {
+        console.error('Could not update cloud settings:', error.message);
+      }
+    } else {
+      const { error } = await supabase
+        .from('user_preferences')
+        .insert(settingsData);
+
+      if (error) {
+        console.error('Could not save cloud settings:', error.message);
+      }
+    }
+  };
+
+  const handleSettingsChange = (newSettings: ReaderSettings) => {
+    setSettings(newSettings);
+    saveSettings(newSettings);
+  };
+
+  const handleRecalibrateTracking = () => {
+    if (!headTrackingEnabled) {
+      setHeadTrackingEnabled(true);
+    }
+    setRecalibrateTrigger((current) => current + 1);
+  };
+
+  const handlePdfUpload = async (file: File) => {
+    try {
+      setPdfFallbackMessage(null);
+      const { extractTextFromPdf } = await import('./utils/pdfParser');
+      const text = await extractTextFromPdf(file);
+      if (text === null || !text.trim()) {
+        setPdfFallbackMessage(
+          `The uploaded file "${file.name}" consists of flattened or scanned images without a selectable text layer. Please upload a text-layered PDF, paste text directly, or load the sample passage.`
+        );
+        return;
+      }
+      setContent(text);
+      setCurrentDocId(null);
+    } catch {
+      setPdfFallbackMessage(
+        'Failed to extract text from the uploaded PDF. Please try another PDF or paste text directly.'
+      );
+    }
+  };
+
+  const handleSaveDocument = async () => {
+    if (!content.trim()) {
+      alert('Please add some content before saving.');
+      return;
+    }
+
+    const title = prompt('Enter document title:', 'Untitled Document');
+    if (!title) return;
+
+    if (!authUserId) {
+      const savedDocument = upsertLocalDocument({
+        id: currentDocId ?? undefined,
+        title,
+        content,
+      });
+      setCurrentDocId(savedDocument.id);
+      setDocuments((current) => [savedDocument, ...current.filter((doc) => doc.id !== savedDocument.id)]);
+      alert('Document saved on this device.');
+      return;
+    }
+
+    if (currentDocId) {
+      const { error } = await supabase
+        .from('documents')
+        .update({
+          title,
+          content,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', currentDocId);
+
+      if (error) {
+        alert(`Could not save the document: ${error.message}`);
+        return;
+      }
+    } else {
+      const { data, error } = await supabase
+        .from('documents')
+        .insert({
+          user_id: authUserId,
+          title,
+          content,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        alert(`Could not save the document: ${error.message}`);
+        return;
+      }
+
+      if (data) {
+        setCurrentDocId(data.id);
+        setDocuments((current) => [data, ...current.filter((doc) => doc.id !== data.id)]);
+      }
+    }
+
+    alert('Document saved successfully!');
+  };
+
+  const handleLoadDocuments = async () => {
+    if (!authUserId) {
+      setDocuments(readLocalDocuments());
+      setShowDocumentModal(true);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('user_id', authUserId)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      alert(`Could not load documents: ${error.message}`);
+      return;
+    }
+
+    setDocuments(data || []);
+    setShowDocumentModal(true);
+  };
+
+  const handleLoadDocument = (doc: Document) => {
+    setContent(doc.content);
+    setCurrentDocId(doc.id);
+  };
+
+  const handleDeleteDocument = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this document?')) return;
+
+    if (!authUserId) {
+      deleteLocalDocument(id);
+    } else {
+      const { error } = await supabase.from('documents').delete().eq('id', id);
+      if (error) {
+        alert(`Could not delete the document: ${error.message}`);
+        return;
+      }
+    }
+
+    setDocuments(documents.filter(doc => doc.id !== id));
+
+    if (currentDocId === id) {
+      setContent('');
+      setCurrentDocId(null);
+    }
+  };
+
+  const startSpeakingFromSentence = (targetSentenceIndex: number | null) => {
+    if (!('speechSynthesis' in window)) {
+      alert('Text-to-speech is not supported in your browser.');
+      return;
+    }
+
+    if (!content.trim()) {
+      alert('Please add some text to read aloud.');
+      return;
+    }
+
+    const sentences = splitIntoSentences(content).filter((segment) => segment.text.trim());
+    if (sentences.length === 0) {
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    let startArrayIndex = 0;
+    if (targetSentenceIndex !== null) {
+      const matchedIndex = sentences.findIndex((segment) => segment.index === targetSentenceIndex);
+      if (matchedIndex >= 0) {
+        startArrayIndex = matchedIndex;
+      }
+    }
+
+    setIsSpeaking(true);
+    speakSentenceSequence(sentences, startArrayIndex);
+  };
+
+  const handleTextToSpeech = () => {
+    if ('speechSynthesis' in window) {
+      if (isSpeaking) {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+        setActiveSentenceIndex(null);
+        return;
+      }
+
+      startSpeakingFromSentence(headTrackingEnabled ? headTrackedSentenceIndex : null);
+    } else {
+      alert('Text-to-speech is not supported in your browser.');
+    }
+  };
+
+  const handleReadFromSentence = (sentenceIndex: number) => {
+    if (!('speechSynthesis' in window)) {
+      alert('Text-to-speech is not supported in your browser.');
+      return;
+    }
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setActiveSentenceIndex(null);
+      return;
+    }
+
+    startSpeakingFromSentence(sentenceIndex);
+  };
+
+  const speakSentenceSequence = (sentences: { index: number; text: string }[], index: number) => {
+    if (!('speechSynthesis' in window)) {
+      return;
+    }
+
+    if (index >= sentences.length) {
+      setIsSpeaking(false);
+      setActiveSentenceIndex(null);
+      return;
+    }
+
+    const sentence = sentences[index];
+    const trimmedSentence = sentence.text.trim();
+    const priorPlayCount = sentenceTtsPlayCounts[sentence.index] ?? 0;
+
+    setActiveSentenceIndex(sentence.index);
+    setSentenceTtsPlayCounts((current) => ({
+      ...current,
+      [sentence.index]: (current[sentence.index] ?? 0) + 1,
+    }));
+
+    const isHighCognitiveLoadSentence =
+      adaptiveEngineEnabled &&
+      (highLoadSentenceIndices.includes(sentence.index) ||
+        priorPlayCount >= 1 ||
+        analyzeSentence(trimmedSentence).isComplex);
+
+    const utterance = new SpeechSynthesisUtterance(trimmedSentence);
+    utterance.rate = isHighCognitiveLoadSentence ? 0.76 : 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onend = () => {
+      if (!window.speechSynthesis.speaking && index === sentences.length - 1) {
+        setIsSpeaking(false);
+        setActiveSentenceIndex(null);
+        return;
+      }
+
+      speakSentenceSequence(sentences, index + 1);
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setActiveSentenceIndex(null);
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  return (
+    <div className="relative min-h-screen bg-stone-100 md:h-screen md:overflow-hidden">
+      {!readingMode && (
+        <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-stone-200 bg-white px-4 py-3 shadow-sm lg:hidden">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-stone-500">
+              Synapse Dyslexia Reader
+            </p>
+            <p className="mt-1 text-sm font-medium text-stone-900">Reading tools and workspace</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobilePanelOpen(true)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-700"
+            aria-label="Open reading tools"
+          >
+            <Menu size={18} />
+          </button>
+        </div>
+      )}
+
+      <div className="flex min-h-[calc(100vh-4.5rem)] flex-col overflow-hidden lg:h-full lg:min-h-0 lg:flex-row">
+        {!readingMode && (
+          <>
+            <div className="hidden lg:block">
+              <ControlPanel
+                settings={settings}
+                onSettingsChange={handleSettingsChange}
+                onPdfUpload={handlePdfUpload}
+                onSaveDocument={handleSaveDocument}
+                onLoadDocuments={handleLoadDocuments}
+                onTextToSpeech={handleTextToSpeech}
+                showReadingGuide={showReadingGuide}
+                onToggleReadingGuide={() => setShowReadingGuide(!showReadingGuide)}
+                focusMode={focusMode}
+                onToggleFocusMode={() => setFocusMode(!focusMode)}
+                wordHighlight={wordHighlight}
+                onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
+                showDifficultWords={showDifficultWords}
+                onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
+                showSentenceSimplification={showSentenceSimplification}
+                onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
+                adaptiveEngineEnabled={adaptiveEngineEnabled}
+                onToggleAdaptiveEngine={() => setAdaptiveEngineEnabled(!adaptiveEngineEnabled)}
+                headTrackingEnabled={headTrackingEnabled}
+                onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
+                headTrackingStatus={headTrackingStatus}
+                isTrackingPositionInitialized={isTrackingPositionInitialized}
+                onRecalibrateTracking={handleRecalibrateTracking}
+                readingMode={readingMode}
+                onToggleReadingMode={() => setReadingMode(!readingMode)}
+                isSpeaking={isSpeaking}
+                headTrackedSentenceIndex={headTrackingEnabled ? headTrackedSentenceIndex : null}
+                onOpenSupportHub={() => setShowSupportHub(true)}
+                onOpenMlPredictionLab={() => setShowMlPredictionLab(true)}
+              />
+            </div>
+            {mobilePanelOpen && (
+              <div className="fixed inset-0 z-40 lg:hidden">
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-stone-900/40 backdrop-blur-[1px]"
+                  onClick={() => setMobilePanelOpen(false)}
+                  aria-label="Close reading tools"
+                />
+                <div className="absolute inset-y-0 left-0 w-[min(24rem,100vw)] shadow-2xl">
+                  <ControlPanel
+                    settings={settings}
+                    onSettingsChange={handleSettingsChange}
+                    onPdfUpload={handlePdfUpload}
+                    onSaveDocument={handleSaveDocument}
+                    onLoadDocuments={handleLoadDocuments}
+                    onTextToSpeech={handleTextToSpeech}
+                    showReadingGuide={showReadingGuide}
+                    onToggleReadingGuide={() => setShowReadingGuide(!showReadingGuide)}
+                    focusMode={focusMode}
+                    onToggleFocusMode={() => setFocusMode(!focusMode)}
+                    wordHighlight={wordHighlight}
+                    onToggleWordHighlight={() => setWordHighlight(!wordHighlight)}
+                    showDifficultWords={showDifficultWords}
+                    onToggleDifficultWords={() => setShowDifficultWords(!showDifficultWords)}
+                    showSentenceSimplification={showSentenceSimplification}
+                    onToggleSentenceSimplification={() => setShowSentenceSimplification(!showSentenceSimplification)}
+                    adaptiveEngineEnabled={adaptiveEngineEnabled}
+                    onToggleAdaptiveEngine={() => setAdaptiveEngineEnabled(!adaptiveEngineEnabled)}
+                    headTrackingEnabled={headTrackingEnabled}
+                    onToggleHeadTracking={() => setHeadTrackingEnabled(!headTrackingEnabled)}
+                    headTrackingStatus={headTrackingStatus}
+                    isTrackingPositionInitialized={isTrackingPositionInitialized}
+                    onRecalibrateTracking={handleRecalibrateTracking}
+                    readingMode={readingMode}
+                    onToggleReadingMode={() => setReadingMode(!readingMode)}
+                    isSpeaking={isSpeaking}
+                    headTrackedSentenceIndex={headTrackingEnabled ? headTrackedSentenceIndex : null}
+                    onOpenSupportHub={() => setShowSupportHub(true)}
+                    onOpenMlPredictionLab={() => {
+                      setMobilePanelOpen(false);
+                      setShowMlPredictionLab(true);
+                    }}
+                    onCloseMobile={() => setMobilePanelOpen(false)}
+                  />
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        <TextEditor
+          content={content}
+          onContentChange={setContent}
+          settings={settings}
+          onSettingsChange={handleSettingsChange}
+          showReadingGuide={showReadingGuide}
+          focusMode={focusMode}
+          wordHighlight={wordHighlight}
+          showDifficultWords={showDifficultWords}
+          showSentenceSimplification={showSentenceSimplification}
+          adaptiveEngineEnabled={adaptiveEngineEnabled}
+          onToggleAdaptiveEngine={() => setAdaptiveEngineEnabled(!adaptiveEngineEnabled)}
+          onHighLoadSentencesChange={setHighLoadSentenceIndices}
+          showMlPredictionLab={showMlPredictionLab}
+          onOpenMlPredictionLab={() => setShowMlPredictionLab(true)}
+          onCloseMlPredictionLab={() => setShowMlPredictionLab(false)}
+          pdfFallbackMessage={pdfFallbackMessage}
+          onDismissPdfFallback={() => setPdfFallbackMessage(null)}
+          headTrackingEnabled={headTrackingEnabled}
+          recalibrateTrigger={recalibrateTrigger}
+          onHeadTrackingStatusChange={setHeadTrackingStatus}
+          onTrackingPositionInitializedChange={setIsTrackingPositionInitialized}
+          onHeadTrackedSentenceChange={setHeadTrackedSentenceIndex}
+          onReadFromSentence={handleReadFromSentence}
+          isSpeaking={isSpeaking}
+          activeSentenceIndex={activeSentenceIndex}
+          sentenceTtsPlayCounts={sentenceTtsPlayCounts}
+          hoverPronunciationRate={hoverPronunciationRate}
+          onHoverPronunciationRateChange={setHoverPronunciationRate}
+          readingMode={readingMode}
+        />
+      </div>
+      {readingMode && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex justify-center px-3 pt-3 sm:px-4 sm:pt-4">
+          <div className="pointer-events-auto flex w-full max-w-4xl flex-col gap-3 rounded-[1.75rem] border border-stone-200 bg-white px-4 py-3 shadow-lg sm:flex-row sm:items-center sm:justify-between sm:rounded-full">
+            <div className="flex items-center gap-3 text-sm text-stone-700">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-600">
+                <PanelLeftClose size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="font-semibold text-stone-900">Reading Mode</p>
+                <p className="text-xs text-stone-500">
+                  Calm reading layout with fewer controls and less visual noise.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowMlPredictionLab(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-violet-100 px-4 py-2 text-sm font-semibold text-violet-900 transition-colors hover:bg-violet-200"
+              >
+                <BrainCircuit size={16} />
+                ML Prediction Lab
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSupportHub(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-stone-100 px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200"
+              >
+                <LifeBuoy size={16} />
+                Support Hub
+              </button>
+              <button
+                type="button"
+                onClick={handleTextToSpeech}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                  isSpeaking ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                }`}
+              >
+                <Volume2 size={16} />
+                {isSpeaking
+                  ? 'Stop Audio'
+                  : headTrackingEnabled && headTrackedSentenceIndex !== null
+                    ? `Read Aloud (Sentence ${headTrackedSentenceIndex + 1})`
+                    : 'Read Aloud'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setReadingMode(false)}
+                className="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+              >
+                <ArrowLeft size={16} />
+                Exit Reading Mode
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <Suspense fallback={null}>
+        {showDocumentModal && (
+          <DocumentModal
+            documents={documents}
+            onClose={() => setShowDocumentModal(false)}
+            onLoad={handleLoadDocument}
+            onDelete={handleDeleteDocument}
+          />
+        )}
+        {showSupportHub && (
+          <SupportHub onClose={() => setShowSupportHub(false)} />
+        )}
+      </Suspense>
+    </div>
+  );
+}
+
+function readLocalSettings(): ReaderSettings | null {
+  const rawSettings = localStorage.getItem(LOCAL_SETTINGS_KEY);
+  if (!rawSettings) {
+    return null;
+  }
+
+  try {
+    return { ...DEFAULT_SETTINGS, ...(JSON.parse(rawSettings) as Partial<ReaderSettings>) };
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalSettings(settings: ReaderSettings) {
+  localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function readLocalDocuments(): Document[] {
+  const rawDocuments = localStorage.getItem(LOCAL_DOCUMENTS_KEY);
+  if (!rawDocuments) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawDocuments) as Document[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalDocuments(documents: Document[]) {
+  localStorage.setItem(LOCAL_DOCUMENTS_KEY, JSON.stringify(documents));
+}
+
+function upsertLocalDocument(input: { id?: string; title: string; content: string }): Document {
+  const now = new Date().toISOString();
+  const documents = readLocalDocuments();
+  const existingDocument = input.id ? documents.find((doc) => doc.id === input.id) : null;
+
+  const nextDocument: Document = existingDocument
+    ? {
+        ...existingDocument,
+        title: input.title,
+        content: input.content,
+        updated_at: now,
+      }
+    : {
+        id: crypto.randomUUID(),
+        title: input.title,
+        content: input.content,
+        created_at: now,
+        updated_at: now,
+      };
+
+  const nextDocuments = [nextDocument, ...documents.filter((doc) => doc.id !== nextDocument.id)];
+  writeLocalDocuments(nextDocuments);
+  return nextDocument;
+}
+
+function deleteLocalDocument(id: string) {
+  const documents = readLocalDocuments().filter((doc) => doc.id !== id);
+  writeLocalDocuments(documents);
+}
+
+export default App;
